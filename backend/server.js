@@ -1,16 +1,10 @@
-// WebSocket server for Distributed Editor
-// Handles peer-to-peer network communication
-
-import { WebSocketServer } from "ws";
+import {WebSocket,  WebSocketServer } from "ws";
 import http from "http";
 
 const PORT = process.env.PORT || 3002;
 const peers = new Map();
 
-// Create HTTP server
 const server = http.createServer();
-
-// Create WebSocket server
 const wss = new WebSocketServer({ server });
 
 wss.on("connection", (ws) => {
@@ -20,7 +14,7 @@ wss.on("connection", (ws) => {
 
   ws.on("message", (data) => {
     try {
-      const message = JSON.parse(data);
+      const message = JSON.parse(data.toString());
       handleMessage(ws, message, (id) => {
         peerId = id;
       });
@@ -46,6 +40,40 @@ function handleMessage(ws, message, setPeerId) {
   const { type, from, targetIp, connections, timestamp } = message;
 
   switch (type) {
+    case "HELLO": {
+  const peerId = `peer_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+  peers.set(peerId, {
+    id: peerId,
+    ws,
+    ipAddress: from.ipAddress,
+    name: from.name,
+    email: from.email,
+    lastSeen: Date.now(),
+  });
+
+  setPeerId(peerId);
+
+  console.log(`[WS] HELLO from ${from.name} (${from.ipAddress})`);
+
+  // ✅ send peer list to this client instantly
+  ws.send(
+    JSON.stringify({
+      type: "PEER_UPDATE",
+      peers: Array.from(peers.values()).map((p) => ({
+        id: p.id,
+        name: p.name,
+        ipAddress: p.ipAddress,
+        email: p.email,
+      })),
+      timestamp: Date.now(),
+    })
+  );
+
+  // ✅ broadcast peer list to everyone
+  broadcastPeerUpdate();
+  break;
+}
     case "CONNECTION_REQUEST": {
       const peerId = `peer_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
       peers.set(peerId, {
@@ -60,12 +88,8 @@ function handleMessage(ws, message, setPeerId) {
 
       console.log(`[WS] Peer ${from.name} connected from ${from.ipAddress}`);
 
-      // Broadcast to all peers about new peer
       if (targetIp) {
-        // Find peer by target IP and forward request
-        const targetPeer = Array.from(peers.values()).find(
-          (p) => p.ipAddress === targetIp,
-        );
+        const targetPeer = Array.from(peers.values()).find((p) => p.ipAddress === targetIp);
         if (targetPeer && targetPeer.ws.readyState === WebSocket.OPEN) {
           targetPeer.ws.send(
             JSON.stringify({
@@ -82,10 +106,7 @@ function handleMessage(ws, message, setPeerId) {
 
     case "CONNECTION_RESPONSE": {
       if (targetIp) {
-        // Find peer by IP and send response
-        const targetPeer = Array.from(peers.values()).find(
-          (p) => p.ipAddress === targetIp,
-        );
+        const targetPeer = Array.from(peers.values()).find((p) => p.ipAddress === targetIp);
         if (targetPeer && targetPeer.ws.readyState === WebSocket.OPEN) {
           targetPeer.ws.send(
             JSON.stringify({
@@ -102,18 +123,9 @@ function handleMessage(ws, message, setPeerId) {
 
     case "PING": {
       if (targetIp) {
-        // Route PING to target peer
-        const targetPeer = Array.from(peers.values()).find(
-          (p) => p.ipAddress === targetIp,
-        );
+        const targetPeer = Array.from(peers.values()).find((p) => p.ipAddress === targetIp);
         if (targetPeer && targetPeer.ws.readyState === WebSocket.OPEN) {
-          targetPeer.ws.send(
-            JSON.stringify({
-              type: "PING",
-              from,
-              timestamp,
-            }),
-          );
+          targetPeer.ws.send(JSON.stringify({ type: "PING", from, timestamp }));
         }
       }
       break;
@@ -121,37 +133,19 @@ function handleMessage(ws, message, setPeerId) {
 
     case "PONG": {
       if (targetIp) {
-        // Send PONG back to sender
-        const senderPeer = Array.from(peers.values()).find(
-          (p) => p.ipAddress === targetIp,
-        );
+        const senderPeer = Array.from(peers.values()).find((p) => p.ipAddress === targetIp);
         if (senderPeer && senderPeer.ws.readyState === WebSocket.OPEN) {
-          senderPeer.ws.send(
-            JSON.stringify({
-              type: "PONG",
-              from,
-              timestamp,
-            }),
-          );
+          senderPeer.ws.send(JSON.stringify({ type: "PONG", from, timestamp }));
         }
       }
       break;
     }
 
     case "SYNC_NETWORK_DATA": {
-      // Broadcast network data to all connected peers
-      const broadcastMessage = {
-        type: "SYNC_NETWORK_DATA",
-        from,
-        connections,
-        timestamp,
-      };
+      const broadcastMessage = { type: "SYNC_NETWORK_DATA", from, connections, timestamp };
 
       peers.forEach((peer) => {
-        if (
-          peer.ws.readyState === WebSocket.OPEN &&
-          peer.ipAddress !== from.ipAddress
-        ) {
+        if (peer.ws.readyState === WebSocket.OPEN && peer.ipAddress !== from.ipAddress) {
           peer.ws.send(JSON.stringify(broadcastMessage));
         }
       });
@@ -171,11 +165,7 @@ function broadcastPeerUpdate() {
     email: p.email,
   }));
 
-  const message = {
-    type: "PEER_UPDATE",
-    peers: peerList,
-    timestamp: Date.now(),
-  };
+  const message = { type: "PEER_UPDATE", peers: peerList, timestamp: Date.now() };
 
   peers.forEach((peer) => {
     if (peer.ws.readyState === WebSocket.OPEN) {
@@ -184,55 +174,19 @@ function broadcastPeerUpdate() {
   });
 }
 
-// Attempt to listen, and if the port is already in use, try the next few ports
-function tryListen(startPort, attempts = 10) {
-  let port = Number(startPort);
-
-  const attempt = () => {
-    server.listen(port, () => {
-      console.log(`[WS] Server running on ws://localhost:${port}`);
-    });
-  };
-
-  server.on("error", (err) => {
-    if (err && err.code === "EADDRINUSE") {
-      console.warn(`[WS] Port ${port} in use, trying port ${port + 1}`);
-      server.removeAllListeners("error");
-      port += 1;
-      if (port - Number(startPort) <= attempts) {
-        // Wait briefly before retrying to avoid tight loop
-        setTimeout(() => attempt(), 200);
-      } else {
-        console.error("[WS] No available ports found, exiting");
-        process.exit(1);
-      }
-    } else {
-      console.error("[WS] Server error:", err);
-      process.exit(1);
-    }
-  });
-
-  attempt();
-}
-
-// Listen on the fixed port and show a clear message if it's unavailable
 server.listen(PORT, () => {
   console.log(`[WS] Server running on ws://localhost:${PORT}`);
 });
 
 server.on("error", (err) => {
   if (err && err.code === "EADDRINUSE") {
-    console.error(
-      `[WS] Port ${PORT} is already in use. Please free the port or set the PORT environment variable to a different port.`,
-    );
-    process.exit(1);
-  } else {
-    console.error("[WS] Server error:", err);
+    console.error(`[WS] Port ${PORT} already in use. Change PORT.`);
     process.exit(1);
   }
+  console.error("[WS] Server error:", err);
+  process.exit(1);
 });
 
-// Graceful shutdown
 process.on("SIGINT", () => {
   console.log("[WS] Shutting down server...");
   server.close(() => {

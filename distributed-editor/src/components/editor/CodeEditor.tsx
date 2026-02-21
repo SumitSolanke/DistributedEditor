@@ -77,7 +77,8 @@ const CodeEditor = () => {
     const maxCol = model ? model.getLineMaxColumn(pendingReveal.line) : 1
 
     editor.revealLineInCenter(pendingReveal.line)
-    editor.setPosition({ lineNumber: pendingReveal.line, column: Math.min(1, maxCol) })
+    const targetCol = pendingReveal.column ? Math.min(pendingReveal.column, maxCol) : 1
+  editor.setPosition({ lineNumber: pendingReveal.line, column: targetCol })
 
     // highlight whole line
     decorationIdsRef.current = editor.deltaDecorations(decorationIdsRef.current, [

@@ -5,16 +5,52 @@ import type {
   HeartbeatConfig,
 } from "../types/user.types";
 
-export type NetworkEventListener = (message: NetworkMessage) => void;
+/**
+ * Event payloads
+ */
+type PongTimeoutPayload = { targetIp: string; connectionId: string };
+
+type EventPayloadMap = {
+  HELLO: NetworkMessage;
+  PEER_UPDATE: NetworkMessage;
+
+  CONNECTION_REQUEST: NetworkMessage;
+  CONNECTION_RESPONSE: NetworkMessage;
+  PING: NetworkMessage;
+  PONG: NetworkMessage;
+  SYNC_NETWORK_DATA: NetworkMessage;
+
+  // fallback
+  MESSAGE: NetworkMessage;
+
+  // special payload (NOT a NetworkMessage)
+  PONG_TIMEOUT: PongTimeoutPayload;
+};
+
+type WsEvent = keyof EventPayloadMap;
+
+export type NetworkEventListener<E extends WsEvent> = (
+  payload: EventPayloadMap[E],
+) => void;
 
 export class WebSocketClient {
   private ws: WebSocket | null = null;
   private url: string;
   private user: User;
-  private listeners: Map<string, Set<NetworkEventListener>> = new Map();
+
+  /**
+   * Internally store as unknown functions to avoid TS intersection issues.
+   * Type-safety is enforced at the on/off/emit boundary.
+   */
+  private listeners: Map<WsEvent, Set<(payload: unknown) => void>> = new Map();
+
   private heartbeatConfig: HeartbeatConfig;
-  private heartbeatIntervals: Map<string, NodeJS.Timeout> = new Map();
-  private pendingPongs: Map<string, number> = new Map(); // Track PONG timeouts
+
+  private heartbeatIntervals: Map<string, ReturnType<typeof setInterval>> =
+    new Map();
+
+  private pendingPongs: Map<string, ReturnType<typeof setTimeout>> = new Map();
+
   private connections: NetworkConnection[] = [];
 
   constructor(
@@ -25,8 +61,8 @@ export class WebSocketClient {
     this.url = wsUrl;
     this.user = user;
     this.heartbeatConfig = {
-      intervalMs: 5000, // Ping every 5 seconds
-      timeoutMs: 3000, // Wait 3 seconds for PONG
+      intervalMs: 5000,
+      timeoutMs: 3000,
       maxRetries: 3,
       ...heartbeatConfig,
     };
@@ -39,6 +75,14 @@ export class WebSocketClient {
 
         this.ws.onopen = () => {
           console.log("[WebSocket] Connected");
+
+          // ✅ register myself on server
+          this.send({
+            type: "HELLO",
+            from: this.user,
+            timestamp: Date.now(),
+          } as NetworkMessage);
+
           resolve();
         };
 
@@ -75,9 +119,10 @@ export class WebSocketClient {
   }
 
   private cleanup(): void {
-    // Clear all heartbeat intervals
     this.heartbeatIntervals.forEach((interval) => clearInterval(interval));
     this.heartbeatIntervals.clear();
+
+    this.pendingPongs.forEach((t) => clearTimeout(t));
     this.pendingPongs.clear();
   }
 
@@ -89,7 +134,6 @@ export class WebSocketClient {
     this.ws.send(JSON.stringify(message));
   }
 
-  // Request connection from another user
   requestConnection(
     targetIp: string,
     currentConnections: NetworkConnection[],
@@ -104,7 +148,6 @@ export class WebSocketClient {
     this.send(message);
   }
 
-  // Send connection response with current connections list
   respondConnection(
     targetUser: User,
     currentConnections: NetworkConnection[],
@@ -119,7 +162,10 @@ export class WebSocketClient {
     this.send(message);
   }
 
-  // Send ping to a specific connection
+  /**
+   * Ping a peer and schedule a PONG timeout.
+   * Key timeouts by targetIp to clear easily when PONG arrives.
+   */
   ping(connectionId: string, targetIp: string): void {
     const message: NetworkMessage = {
       type: "PING",
@@ -129,15 +175,17 @@ export class WebSocketClient {
     };
     this.send(message);
 
-    // Set timeout to track PONG response
+    // clear old timeout for same peer
+    const old = this.pendingPongs.get(targetIp);
+    if (old) clearTimeout(old);
+
     const timeoutId = setTimeout(() => {
       this.emit("PONG_TIMEOUT", { targetIp, connectionId });
     }, this.heartbeatConfig.timeoutMs);
 
-    this.pendingPongs.set(`${targetIp}:${Date.now()}`, timeoutId);
+    this.pendingPongs.set(targetIp, timeoutId);
   }
 
-  // Send PONG response
   pong(targetIp: string): void {
     const message: NetworkMessage = {
       type: "PONG",
@@ -148,7 +196,6 @@ export class WebSocketClient {
     this.send(message);
   }
 
-  // Send network data sync
   syncNetworkData(connections: NetworkConnection[], targetIp?: string): void {
     const message: NetworkMessage = {
       type: "SYNC_NETWORK_DATA",
@@ -160,12 +207,9 @@ export class WebSocketClient {
     this.send(message);
   }
 
-  // Start heartbeat for a connection
   startHeartbeat(connectionId: string, connectionIp: string): void {
-    // Clear existing interval if any
-    if (this.heartbeatIntervals.has(connectionId)) {
-      clearInterval(this.heartbeatIntervals.get(connectionId));
-    }
+    const existing = this.heartbeatIntervals.get(connectionId);
+    if (existing) clearInterval(existing);
 
     const interval = setInterval(() => {
       this.ping(connectionId, connectionIp);
@@ -174,7 +218,6 @@ export class WebSocketClient {
     this.heartbeatIntervals.set(connectionId, interval);
   }
 
-  // Stop heartbeat for a connection
   stopHeartbeat(connectionId: string): void {
     const interval = this.heartbeatIntervals.get(connectionId);
     if (interval) {
@@ -188,58 +231,60 @@ export class WebSocketClient {
       case "CONNECTION_REQUEST":
         this.emit("CONNECTION_REQUEST", message);
         break;
+
       case "CONNECTION_RESPONSE":
         this.emit("CONNECTION_RESPONSE", message);
         break;
+
       case "PING":
-        // Auto-respond to PING
         this.pong(message.from.ipAddress);
         this.emit("PING", message);
         break;
-      case "PONG":
+
+      case "PONG": {
         this.emit("PONG", message);
-        // Clear pending timeout
-        const pending = Array.from(this.pendingPongs.entries()).find(([key]) =>
-          key.startsWith(message.from.ipAddress),
-        );
-        if (pending) {
-          clearTimeout(pending[1]);
-          this.pendingPongs.delete(pending[0]);
+
+        const t = this.pendingPongs.get(message.from.ipAddress);
+        if (t) {
+          clearTimeout(t);
+          this.pendingPongs.delete(message.from.ipAddress);
         }
         break;
+      }
+
       case "SYNC_NETWORK_DATA":
         this.emit("SYNC_NETWORK_DATA", message);
         break;
+
+      case "PEER_UPDATE":
+        this.emit("PEER_UPDATE", message);
+        break;
+
+      case "HELLO":
+        this.emit("HELLO", message);
+        break;
+
       default:
         this.emit("MESSAGE", message);
+        break;
     }
   }
 
-  on(
-    eventType: NetworkMessage["type"] | "MESSAGE" | "PONG_TIMEOUT",
-    listener: NetworkEventListener,
-  ): void {
+  on<E extends WsEvent>(eventType: E, listener: NetworkEventListener<E>): void {
     if (!this.listeners.has(eventType)) {
       this.listeners.set(eventType, new Set());
     }
-    this.listeners.get(eventType)!.add(listener);
+    this.listeners.get(eventType)!.add(listener as (p: unknown) => void);
   }
 
-  off(
-    eventType: NetworkMessage["type"] | "MESSAGE" | "PONG_TIMEOUT",
-    listener: NetworkEventListener,
-  ): void {
-    const listeners = this.listeners.get(eventType);
-    if (listeners) {
-      listeners.delete(listener);
-    }
+  off<E extends WsEvent>(eventType: E, listener: NetworkEventListener<E>): void {
+    this.listeners.get(eventType)?.delete(listener as (p: unknown) => void);
   }
 
-  private emit(eventType: string, data: unknown): void {
-    const listeners = this.listeners.get(eventType);
-    if (listeners) {
-      listeners.forEach((listener) => listener(data as NetworkMessage));
-    }
+  private emit<E extends WsEvent>(eventType: E, payload: EventPayloadMap[E]): void {
+    const set = this.listeners.get(eventType);
+    if (!set) return;
+    set.forEach((fn) => (fn as (p: EventPayloadMap[E]) => void)(payload));
   }
 
   isConnected(): boolean {

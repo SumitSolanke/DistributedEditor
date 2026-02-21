@@ -62,10 +62,9 @@ function startWebSocketServer() {
   // Path to backend server script
   const backendPath = path.join(__dirname, "./server.js");
 
-  wsServer = spawn("node", [backendPath], {
-    stdio: "inherit",
-    detached: false,
-  });
+  wsServer = spawn(process.execPath, [backendPath], {
+  stdio: "inherit",
+})
 
   wsServer.on("error", (error) => {
     console.error("Failed to start WebSocket server:", error);

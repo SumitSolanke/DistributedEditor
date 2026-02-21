@@ -8,19 +8,13 @@ export default function App() {
   const { isRegistered, isLoading, loadUserFromElectronStore } = useAuthStore();
   const initWebSocket = useNetworkStore((s) => s.initWebSocket);
 
-  // Load user from Electron store on app start
   useEffect(() => {
     const initApp = async () => {
       await loadUserFromElectronStore();
 
-      // Initialize WebSocket if user is registered
       const user = useAuthStore.getState().currentUser;
       if (user) {
-        try {
-          await initWebSocket("ws://localhost:8080");
-        } catch (error) {
-          console.error("Failed to connect to WebSocket server:", error);
-        }
+        await initWebSocket("ws://localhost:3002"); // ✅ FIXED
       }
     };
 
@@ -32,9 +26,7 @@ export default function App() {
       <div className="min-h-screen bg-[#1e1e1e] text-white flex items-center justify-center">
         <div className="text-center">
           <div className="text-lg font-semibold mb-2">Loading...</div>
-          <div className="text-gray-400 text-sm">
-            Initializing Distributed Editor
-          </div>
+          <div className="text-gray-400 text-sm">Initializing Distributed Editor</div>
         </div>
       </div>
     );

@@ -163,6 +163,8 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
 
   // WebSocket initialization
   initWebSocket: async (wsUrl: string) => {
+     if (get().isConnecting) return;
+  if (get().wsClient?.isConnected()) return;
     set({ isConnecting: true });
     try {
       const currentUser = useAuthStore.getState().currentUser;
@@ -174,15 +176,25 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
       await client.connect();
 
       // Set up event listeners
-      client.on("CONNECTION_REQUEST", (msg) =>
-        get().handleConnectionRequest(msg),
-      );
-      client.on("CONNECTION_RESPONSE", (msg) =>
-        get().handleConnectionResponse(msg),
-      );
-      client.on("PING", (msg) => get().handlePing(msg));
-      client.on("PONG_TIMEOUT", (msg: any) => get().handlePongTimeout(msg));
-      client.on("SYNC_NETWORK_DATA", (msg) => get().handleSyncNetworkData(msg));
+
+      client.on("CONNECTION_REQUEST", (msg) => get().handleConnectionRequest(msg));
+client.on("CONNECTION_RESPONSE", (msg) => get().handleConnectionResponse(msg));
+client.on("PING", (msg) => get().handlePing(msg));
+client.on("PONG_TIMEOUT", (data) => get().handlePongTimeout(data));
+client.on("SYNC_NETWORK_DATA", (msg) => get().handleSyncNetworkData(msg));
+
+client.on("PEER_UPDATE", (msg) => {
+  if (!msg.peers) return;
+
+  const incoming = msg.peers.map((p) => ({
+    peerId: p.id,
+    name: p.name,
+    ip: p.ipAddress,
+    email: p.email,
+  }));
+
+  get().mergePeers(incoming, "connected");
+});
 
       set({ wsClient: client, isConnecting: false });
       console.log("[Network] WebSocket connected");

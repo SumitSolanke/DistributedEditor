@@ -1,17 +1,16 @@
 import { useState, useEffect } from "react";
-import { Network, Send, RefreshCw } from "lucide-react";
+import { Network, Send } from "lucide-react";
 import { useNetworkStore } from "../../store/networkStore";
 import { useAuthStore } from "../../store/authStore";
 
 export default function NetworkPanel() {
-  const {
-    connections,
-    pingTargetIp,
-    setPingTargetIp,
-    requestConnectionToPeer,
-    wsClient,
-    isConnecting,
-  } = useNetworkStore();
+ const {
+  connections,
+  setPingTargetIp,
+  requestConnectionToPeer,
+  wsClient,
+  isConnecting,
+} = useNetworkStore();
 
   const currentUser = useAuthStore((s) => s.currentUser);
   const [inputIp, setInputIp] = useState("");

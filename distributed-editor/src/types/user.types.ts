@@ -20,6 +20,8 @@ export interface NetworkConnection {
 
 // Message types for WebSocket communication
 export type NetworkMessageType =
+  | "HELLO"
+  | "PEER_UPDATE"
   | "CONNECTION_REQUEST"
   | "CONNECTION_RESPONSE"
   | "PING"
@@ -30,9 +32,18 @@ export type NetworkMessageType =
 export interface NetworkMessage {
   type: NetworkMessageType;
   from: User;
-  connections?: NetworkConnection[]; // List of connections known to sender
-  targetIp?: string; // Target IP for ping/specific requests
+  connections?: NetworkConnection[];
+  targetIp?: string;
   timestamp: number;
+
+  // ✅ server sends this for PEER_UPDATE
+  peers?: Array<{
+    id: string;
+    name: string;
+    ipAddress: string;
+    email: string;
+  }>;
+
   payload?: Record<string, unknown>;
 }
 

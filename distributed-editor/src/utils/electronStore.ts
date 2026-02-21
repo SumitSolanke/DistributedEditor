@@ -1,38 +1,70 @@
 import type { User, NetworkConnection } from "../types/user.types";
 
-// Utility module for Electron store access
-// This abstracts the IPC communication with the main process
+/** Runtime validator for User coming from Electron store (unknown). */
+function isUser(value: unknown): value is User {
+  if (!value || typeof value !== "object") return false;
+
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.name === "string" &&
+    typeof v.ipAddress === "string" &&
+    typeof v.email === "string"
+  );
+}
+
+/** Runtime validator for NetworkConnection */
+function isNetworkConnection(value: unknown): value is NetworkConnection {
+  if (!value || typeof value !== "object") return false;
+
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.name === "string" &&
+    typeof v.ipAddress === "string" &&
+    typeof v.email === "string" &&
+    typeof v.isActive === "boolean" &&
+    typeof v.lastPingTime === "number" &&
+    typeof v.createdAt === "number"
+  );
+}
+
+function safeArray<T>(
+  value: unknown,
+  isItem: (x: unknown) => x is T,
+): T[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isItem);
+}
 
 export const electronStoreAPI = {
-  // User data
+  // ✅ User data
   async getUser(): Promise<User | null> {
-    return window.electron?.store?.get("user") ?? null;
+    const raw = window.electron?.store?.get?.("user");
+    if (isUser(raw)) return raw;
+    return null;
   },
 
   async setUser(user: User): Promise<void> {
-    if (window.electron?.store?.set) {
-      window.electron.store.set("user", user);
-    }
+    window.electron?.store?.set?.("user", user);
   },
 
-  // Network connections
+  // ✅ Network connections
   async getConnections(): Promise<NetworkConnection[]> {
-    return window.electron?.store?.get("connections") ?? [];
+    const raw = window.electron?.store?.get?.("connections");
+    return safeArray(raw, isNetworkConnection);
   },
 
   async setConnections(connections: NetworkConnection[]): Promise<void> {
-    if (window.electron?.store?.set) {
-      window.electron.store.set("connections", connections);
-    }
+    window.electron?.store?.set?.("connections", connections);
   },
 
   async addConnection(connection: NetworkConnection): Promise<void> {
     const connections = await this.getConnections();
-    // Prevent duplicates by IP and email
+
     const exists = connections.some(
-      (c) =>
-        c.ipAddress === connection.ipAddress && c.email === connection.email,
+      (c) => c.ipAddress === connection.ipAddress && c.email === connection.email,
     );
+
     if (!exists) {
       connections.push(connection);
       await this.setConnections(connections);
@@ -55,9 +87,7 @@ export const electronStoreAPI = {
   },
 
   async clearAllData(): Promise<void> {
-    if (window.electron?.store?.clear) {
-      window.electron.store.clear();
-    }
+    window.electron?.store?.clear?.();
   },
 };
 
@@ -66,9 +96,9 @@ declare global {
   interface Window {
     electron?: {
       store?: {
-        get: (key: string) => unknown;
-        set: (key: string, value: unknown) => void;
-        clear: () => void;
+        get?: (key: string) => unknown;
+        set?: (key: string, value: unknown) => void;
+        clear?: () => void;
       };
     };
   }

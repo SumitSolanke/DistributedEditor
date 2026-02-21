@@ -58,7 +58,6 @@ export default function RightSidebar({ isOpen }: { isOpen: boolean }) {
     getDmUsers,
   } = useChatStore();
 
-  const closeNetworkOverlay = useNetworkStore((s) => s.closeOverlay);
   const overlayOpen = useNetworkStore((s) => s.overlayOpen);
 
   const dmUsers = getDmUsers();
