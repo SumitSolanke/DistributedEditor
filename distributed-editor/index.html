@@ -7,6 +7,38 @@
     <title>distributed-editor</title>
   </head>
   <body>
+    <script>
+      // Simple runtime error overlay to surface fatal errors before React mounts
+      (function () {
+        function showOverlay(message) {
+          try {
+            document.body.innerHTML = "";
+            var pre = document.createElement("pre");
+            pre.style.cssText =
+              "color:#fff;background:#c53030;padding:16px;white-space:pre-wrap;font-family:monospace;";
+            pre.textContent =
+              typeof message === "string"
+                ? message
+                : message && message.stack
+                  ? message.stack
+                  : String(message);
+            document.body.appendChild(pre);
+          } catch (e) {
+            console.error("Failed to render overlay", e);
+          }
+        }
+
+        window.addEventListener("error", function (ev) {
+          console.error("Runtime error captured:", ev.error || ev.message, ev);
+          showOverlay(ev.error || ev.message || "Unknown runtime error");
+        });
+
+        window.addEventListener("unhandledrejection", function (ev) {
+          console.error("Unhandled rejection:", ev.reason);
+          showOverlay(ev.reason || "Unhandled promise rejection");
+        });
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

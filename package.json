@@ -1,1 +1,24 @@
-{}
+{
+  "type": "module",
+  "name": "DistributedEditor",
+  "version": "1.0.0",
+  "description": "Distributed collaborative editor with WebSocket networking",
+  "main": "backend/main.js",
+  "scripts": {
+    "dev": "concurrently \"cd distributed-editor && npm run dev\" \"nodemon backend/server.js\"",
+    "start": "electron backend/main.js",
+    "build": "cd distributed-editor && npm run build",
+    "backend:start": "node backend/server.js",
+    "backend:dev": "nodemon backend/server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-is-dev": "^3.0.0",
+    "electron-store": "^8.1.0",
+    "nodemon": "^3.0.2"
+  }
+}
