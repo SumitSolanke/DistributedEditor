@@ -1,20 +1,45 @@
-import { useState } from "react"
-import { useAuthStore } from "../store/authStore"
+import { useState } from "react";
+import { useAuthStore } from "../store/authStore";
 
 export default function RegisterPage() {
-  const register = useAuthStore((s) => s.register)
+  const register = useAuthStore((s) => s.register);
 
-  const [name, setName] = useState("")
-  const [ip, setIp] = useState("")
-  const [email, setEmail] = useState("")
+  const [name, setName] = useState("");
+  const [ip, setIp] = useState("");
+  const [email, setEmail] = useState("");
 
-  const submit = () => {
+  const submit = async () => {
     if (!name.trim() || !ip.trim() || !email.trim()) {
-      alert("Please fill Name, IP and Email")
-      return
+      alert("Please fill Name, IP and Email");
+      return;
     }
-    register({ name, ip, email })
-  }
+
+    const userData = { name, ip, email };
+    console.log("Submitting registration:", userData);
+
+    // Call backend to store user data
+    let backendSuccess = false;
+    if (window.api) {
+      try {
+        console.log("Calling window.api.sendUserData...");
+        await window.api.sendUserData(userData);
+        console.log("Backend call successful!");
+        backendSuccess = true;
+        alert("Profile created successfully!");
+      } catch (error) {
+        console.error("Backend call failed:", error);
+        alert("Error creating profile: " + (error as Error).message);
+        // Don't return - continue to store locally even if backend fails
+      }
+    } else {
+      console.warn("window.api not available");
+    }
+
+    // Always store locally
+    console.log("Storing in local auth store...");
+    register(userData);
+    console.log("Registration complete - backend success:", backendSuccess);
+  };
 
   return (
     <div className="min-h-screen bg-[#1e1e1e] text-white flex items-center justify-center p-4">
@@ -64,5 +89,5 @@ export default function RegisterPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }
