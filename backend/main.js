@@ -1,6 +1,7 @@
-import { app, BrowserWindow, Menu } from "electron/main";
-import registerUserHandlers from "./network/connections.js";
-import userStore from "./storage/store.js";
+import { app, BrowserWindow, Menu, ipcMain } from "electron/main";
+import connections from "./network/connections.js";
+import { sendDeviceListToAll } from "./network/websockets.js";
+import { user as userStore, devices } from "./storage/store.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,15 +23,27 @@ const createWindow = () => {
 };
 
 app.whenReady().then(() => {
-  registerUserHandlers();
+  // Register IPC handlers before creating the window so renderer can call them immediately
+  connections.registerHandlers();
   createWindow();
-
+  try {
+    sendDeviceListToAll();
+  } catch (e) {
+    // if sendDeviceListToAll is not available, ignore
+    console.warn(
+      "sendDeviceListToAll not available at startup:",
+      e?.message || e,
+    );
+  }
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
 });
+
+// Note: deletion of user data is handled by backend on shutdown (see app.on('before-quit')).
+// We do NOT expose a `clearUserData` IPC endpoint to the renderer in production.
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
@@ -39,5 +52,6 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  userStore.clear(); // Clear all stored data before app closes
+  userStore.clear();
+  devices.set("list", []);
 });

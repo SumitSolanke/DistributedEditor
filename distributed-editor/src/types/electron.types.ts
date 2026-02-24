@@ -7,8 +7,8 @@ export interface UserData {
 export interface ElectronAPI {
   sendUserData: (data: UserData) => Promise<void>;
   isUserRegistered: () => Promise<boolean>;
-  clearUserData: () => Promise<{ success: boolean }>;
-  resetRegistration: () => Promise<{ success: boolean }>;
+  connectDevice?: (device: string) => Promise<{ success: boolean }>;
+  getConnections?: () => Promise<{ success: boolean; connections?: any[] }>;
 }
 
 declare global {

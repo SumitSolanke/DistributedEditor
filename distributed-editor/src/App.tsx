@@ -13,11 +13,32 @@ export default function App() {
 
     const syncWithBackend = async () => {
       console.log("App mounted - syncing with backend...");
-      console.log("window.api available?", !!window.api);
 
-      if (window.api) {
+      // Load any persisted frontend auth state so UI can render quickly
+      try {
+        const persisted = localStorage.getItem("dce-auth");
+        if (persisted) {
+          try {
+            const parsed = JSON.parse(persisted);
+            // Reinstate minimal auth state if present
+            if (parsed && parsed.currentUser) {
+              useAuthStore.setState({
+                user: parsed.user ?? null,
+                currentUser: parsed.currentUser ?? null,
+                isRegistered: Boolean(parsed.isRegistered),
+              });
+            }
+          } catch (e) {
+            console.warn("Failed to parse persisted auth", e);
+          }
+        }
+      } catch (e) {
+        /* ignore */
+      }
+
+      // Then verify backend-known registration state when possible
+      if (window.api && typeof window.api.isUserRegistered === "function") {
         try {
-          console.log("Checking if backend has user...");
           const backendHasUser = await window.api.isUserRegistered();
           console.log("Backend has user:", backendHasUser);
 
@@ -26,23 +47,19 @@ export default function App() {
               // Backend has no user, clear frontend auth
               console.log("Backend has no user - clearing frontend auth");
               localStorage.removeItem("dce-auth");
-              useAuthStore.setState({
-                user: null,
-                isRegistered: false,
-              });
+              useAuthStore.setState({ user: null, currentUser: null, isRegistered: false });
             }
             setIsInitialized(true);
           }
         } catch (error) {
           console.error("Error syncing with backend:", error);
           if (mounted) {
-            // Clear auth on error
-            localStorage.removeItem("dce-auth");
+            // allow UI to show based on local state if backend check fails
             setIsInitialized(true);
           }
         }
       } else {
-        console.log("No window.api available");
+        // No backend API available — proceed using local state
         if (mounted) setIsInitialized(true);
       }
     };
@@ -54,18 +71,9 @@ export default function App() {
     };
   }, []);
 
-  if (!isInitialized) {
-    console.log("App still initializing...");
-    return null;
-  }
+  if (!isInitialized) return null;
 
-  console.log("App initialized - isRegistered:", isRegistered);
+  if (!isRegistered) return <RegisterPage />;
 
-  if (!isRegistered) {
-    console.log("Rendering RegisterPage");
-    return <RegisterPage />;
-  }
-
-  console.log("Rendering MainLayout");
   return <MainLayout />;
 }
