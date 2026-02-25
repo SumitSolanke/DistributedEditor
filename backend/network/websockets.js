@@ -1,5 +1,5 @@
 import WebSocket, { WebSocketServer } from "ws";
-
+import { devices, mergeDevices, addDevice } from "../storage/store.js";
 const PORT = 3000;
 const wss = new WebSocketServer({ port: PORT });
 
@@ -26,7 +26,7 @@ wss.on("connection", (socket, request) => {
   });
 });
 
-export function sendDeviceListToDevice(ip) {
+export async function sendDeviceListToDevice(ip) {
   const myDeviceList = devices.get("list") || [];
   const socket = new WebSocket(`ws://${ip}:${PORT}`);
 
@@ -43,7 +43,7 @@ export function sendDeviceListToDevice(ip) {
       const message = JSON.parse(data.toString());
 
       if (message.type === "DEVICE_LIST_RESPONSE") {
-        console.log("Received response from", device.email);
+        console.log("Received response from");
 
         mergeDevices(message.payload);
 
@@ -51,11 +51,11 @@ export function sendDeviceListToDevice(ip) {
         socket.close();
       }
     } catch (err) {
-      console.log("Invalid message from", device.email);
+      console.log("Invalid message from");
     }
   });
   socket.on("close", () => {
-    console.log("Connection closed with", device.email);
+    console.log("Connection closed with");
   });
 }
 export function sendDeviceListToAll() {

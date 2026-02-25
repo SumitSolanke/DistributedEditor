@@ -52,8 +52,9 @@ export function registerHandlers() {
 
   ipcMain.handle("connectDevice", async (event, device) => {
     try {
+      console.log("Connect to Device");
       device = device.trim();
-      sendDeviceListToDevice(device);
+      await sendDeviceListToDevice(device);
       return { success: true };
     } catch (e) {
       console.error("IPC connectDevice error:", e);
