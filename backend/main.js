@@ -1,7 +1,9 @@
 import { app, BrowserWindow, Menu, ipcMain } from "electron/main";
 import connections from "./network/connections.js";
+import files from "./fileHandling/fileOperations.js";
 import { sendDeviceListToAll } from "./network/websockets.js";
 import { user as userStore, devices } from "./storage/store.js";
+import { registerProjectHandlers } from "./fileHandling/project.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,6 +27,8 @@ const createWindow = () => {
 app.whenReady().then(() => {
   // Register IPC handlers before creating the window so renderer can call them immediately
   connections.registerHandlers();
+  files.fileHandlers();
+  registerProjectHandlers();
   createWindow();
   try {
     sendDeviceListToAll();
