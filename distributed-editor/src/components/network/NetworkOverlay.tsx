@@ -1,64 +1,95 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X, PlugZap, Network } from "lucide-react";
 import { useNetworkStore } from "../../store/networkStore";
 
+interface ConnectionItem {
+  id?: string;
+  name?: string;
+  ip?: string;
+  email?: string;
+}
+
 export default function NetworkOverlay() {
-  const { overlayOpen, closeOverlay, peers, pingByIp, initSelf } =
-    useNetworkStore();
+  const { overlayOpen, closeOverlay, pingByIp } = useNetworkStore();
 
   const [ip, setIp] = useState("");
   const [q, setQ] = useState("");
-  const [connectionsList, setConnectionsList] = useState<any[]>([]);
+  const [connectionsList, setConnectionsList] = useState<ConnectionItem[]>([]);
   const ipRef = useRef<HTMLInputElement | null>(null);
 
+  const refreshConnections = useCallback(async () => {
+    const getConnections = window.api?.getConnections;
+    if (!getConnections) {
+      setConnectionsList([]);
+      return;
+    }
+
+    try {
+      const res = await getConnections();
+      if (res && res.success && Array.isArray(res.connections)) {
+        setConnectionsList(res.connections as ConnectionItem[]);
+      } else {
+        setConnectionsList([]);
+      }
+    } catch {
+      setConnectionsList([]);
+    }
+  }, []);
+
+  const connectToIp = useCallback(async () => {
+    const target = ip.trim();
+    if (!target) return;
+
+    if (window.api?.connectDevice) {
+      try {
+        await window.api.connectDevice(target);
+      } catch (err) {
+        console.error("connectDevice failed:", err);
+      }
+    } else {
+      pingByIp(target);
+    }
+
+    setIp("");
+    await refreshConnections();
+  }, [ip, pingByIp, refreshConnections]);
+
   useEffect(() => {
-    if (overlayOpen) initSelf();
-    // fetch connections from backend via IPC when overlay opens
-    if (overlayOpen && window.api?.getConnections) {
-      (async () => {
-        try {
-          const res = await window.api.getConnections();
-          if (res && res.success && Array.isArray(res.connections)) {
-            setConnectionsList(res.connections);
-          } else {
-            setConnectionsList([]);
-          }
-        } catch (e) {
-          setConnectionsList([]);
-        }
-      })();
-    }
+    if (!overlayOpen) return;
+
+    // initialize peer state once when overlay opens
+    useNetworkStore.getState().initSelf();
+
+    void refreshConnections();
+
     // focus input when overlay opens
-    if (overlayOpen) {
-      setTimeout(() => ipRef.current?.focus(), 50);
-    }
-  }, [overlayOpen, initSelf]);
+    const timer = window.setTimeout(() => ipRef.current?.focus(), 50);
+    return () => window.clearTimeout(timer);
+  }, [overlayOpen, refreshConnections]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return peers;
-    return peers.filter(
+    if (!s) return connectionsList;
+    return connectionsList.filter(
       (p) =>
-        p.name.toLowerCase().includes(s) ||
-        p.ip.toLowerCase().includes(s) ||
-        p.email.toLowerCase().includes(s),
+        (p.name ?? "").toLowerCase().includes(s) ||
+        (p.ip ?? "").toLowerCase().includes(s) ||
+        (p.email ?? "").toLowerCase().includes(s),
     );
-  }, [q, peers]);
+  }, [q, connectionsList]);
 
   if (!overlayOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999]">
-      {/* dim area */}
-      <div
-        className="absolute inset-0 bg-black/40 z-0"
-        onClick={closeOverlay}
-      />
+    <div className="fixed inset-0 z-[9999]" onMouseDown={closeOverlay}>
+      <div className="absolute inset-0 bg-black/40 z-0 pointer-events-none" />
 
-      {/* panel */}
       <div
-        className="absolute top-0 left-0 h-full w-[520px] bg-[#252526] border-r border-gray-700 shadow-xl z-10 pointer-events-auto"
-        onClick={(e) => e.stopPropagation()} // ✅ stop bubble
+        className="absolute top-0 left-0 h-full w-[520px] bg-[#252526] border-r border-gray-700 shadow-xl z-20 pointer-events-auto"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDownCapture={(e) => e.stopPropagation()}
+        onKeyUpCapture={(e) => e.stopPropagation()}
       >
         <div className="h-12 px-3 flex items-center justify-between border-b border-gray-700">
           <div className="flex items-center gap-2 text-sm font-semibold">
@@ -74,51 +105,33 @@ export default function NetworkOverlay() {
 
         <div className="p-3 space-y-3">
           <div className="text-xs text-gray-400">
-            Ping by IP (mock). Try:{" "}
-            <span className="text-gray-200">10.0.0.55</span>
+            Ping by IP. Try: <span className="text-gray-200">10.0.0.55</span>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2 relative z-30">
             <input
               ref={ipRef}
+              type="text"
+              autoFocus
               value={ip}
-              onChange={(e) => {
-                setIp(e.target.value);
-                // debug logging to help diagnose uneditable input
-                // eslint-disable-next-line no-console
-                console.debug("NetworkOverlay ip change:", e.target.value);
+              onChange={(e) => setIp(e.target.value)}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onFocus={(e) => e.stopPropagation()}
+              onKeyDown={async (e) => {
+                e.stopPropagation();
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                await connectToIp();
               }}
               placeholder="Enter IP to ping..."
-              className="flex-1 bg-[#1e1e1e] border border-gray-700 rounded px-3 py-2 text-sm outline-none pointer-events-auto"
+              className="flex-1 min-w-0 bg-[#1a1a1a] text-white placeholder:text-gray-400 border border-gray-500 rounded px-3 py-2 text-sm outline-none pointer-events-auto focus:border-[#007acc] focus:ring-1 focus:ring-[#007acc]"
             />
             <button
-              onClick={async () => {
-                const target = ip.trim();
-                if (!target) return;
-                // call backend via preload API to connect to device
-                if (window.api?.connectDevice) {
-                  try {
-                    await window.api.connectDevice(target);
-                  } catch (e) {
-                    console.error("connectDevice failed:", e);
-                  }
-                } else {
-                  // fallback to old behavior
-                  pingByIp(target);
-                }
-                setIp("");
-
-                // refresh connections list after attempting connect
-                if (window.api?.getConnections) {
-                  try {
-                    const res = await window.api.getConnections();
-                    if (res && res.success && Array.isArray(res.connections)) {
-                      setConnectionsList(res.connections);
-                    }
-                  } catch (e) {
-                    /* ignore */
-                  }
-                }
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={async (e) => {
+                e.stopPropagation();
+                await connectToIp();
               }}
               className="px-3 py-2 text-sm rounded bg-[#007acc] hover:opacity-90 inline-flex items-center gap-2"
             >
@@ -134,22 +147,20 @@ export default function NetworkOverlay() {
           />
 
           <div className="text-xs text-gray-400">
-            Connected peers ({connectionsList.length})
+            Connected peers ({filtered.length})
           </div>
 
           <div className="space-y-2 max-h-[calc(100vh-220px)] overflow-auto pr-1">
-            {connectionsList.length === 0 ? (
+            {filtered.length === 0 ? (
               <div className="text-xs text-gray-500 p-2">No connections</div>
             ) : (
-              connectionsList.map((c: any) => (
+              filtered.map((c) => (
                 <div
                   key={c.email || c.ip || c.id}
                   className="bg-[#2a2d2e] border border-[#3a3f41] rounded px-3 py-2"
                 >
                   <div className="flex items-center justify-between">
-                    <div className="font-medium">
-                      {c.name || c.email || c.ip}
-                    </div>
+                    <div className="font-medium">{c.name || c.email || c.ip}</div>
                     <div className="text-xs text-gray-400">{c.ip}</div>
                   </div>
                 </div>

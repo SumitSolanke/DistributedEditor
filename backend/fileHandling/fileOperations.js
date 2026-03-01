@@ -5,6 +5,7 @@ import { app } from "electron";
 import store from "../storage/project.js";
 
 const userDataPath = app.getPath("userData");
+console.log("User data path:", userDataPath);
 const projectsRoot = path.join(userDataPath, "projects");
 
 function getProjectRoot() {
@@ -150,7 +151,8 @@ async function ensureProjectsRoot() {
 }
 
 export async function addProjectFolder(projectName) {
-  const safeProjectName = typeof projectName === "string" ? projectName.trim() : "";
+  const safeProjectName =
+    typeof projectName === "string" ? projectName.trim() : "";
   if (!safeProjectName) {
     throw new Error("Project name is required");
   }
@@ -159,7 +161,12 @@ export async function addProjectFolder(projectName) {
   try {
     await fs.mkdir(projectPath, { recursive: false });
   } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "EEXIST"
+    ) {
       throw new Error("Project already exists");
     }
     throw error;

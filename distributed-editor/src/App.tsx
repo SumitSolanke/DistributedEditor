@@ -3,6 +3,8 @@ import RegisterPage from "./pages/RegisterPage";
 import { useAuthStore } from "./store/authStore";
 import { useEffect, useState } from "react";
 
+let hasCheckedBackendRegistration = false;
+
 export default function App() {
   const isRegistered = useAuthStore((s) => s.isRegistered);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -12,6 +14,11 @@ export default function App() {
     let mounted = true;
 
     const syncWithBackend = async () => {
+      if (hasCheckedBackendRegistration) {
+        if (mounted) setIsInitialized(true);
+        return;
+      }
+
       console.log("App mounted - syncing with backend...");
 
       // Load any persisted frontend auth state so UI can render quickly
@@ -20,20 +27,19 @@ export default function App() {
         if (persisted) {
           try {
             const parsed = JSON.parse(persisted);
-            // Reinstate minimal auth state if present
-            if (parsed && parsed.currentUser) {
+            // Zustand persist payload shape: { state, version }
+            if (parsed && parsed.state) {
               useAuthStore.setState({
-                user: parsed.user ?? null,
-                currentUser: parsed.currentUser ?? null,
-                isRegistered: Boolean(parsed.isRegistered),
+                user: parsed.state.user ?? null,
+                isRegistered: Boolean(parsed.state.isRegistered),
               });
             }
           } catch (e) {
             console.warn("Failed to parse persisted auth", e);
           }
         }
-      } catch (e) {
-        /* ignore */
+      } catch {
+        // ignore localStorage access errors
       }
 
       // Then verify backend-known registration state when possible
@@ -47,24 +53,29 @@ export default function App() {
               // Backend has no user, clear frontend auth
               console.log("Backend has no user - clearing frontend auth");
               localStorage.removeItem("dce-auth");
-              useAuthStore.setState({ user: null, currentUser: null, isRegistered: false });
+              useAuthStore.setState({ user: null, isRegistered: false });
             }
+            hasCheckedBackendRegistration = true;
             setIsInitialized(true);
           }
         } catch (error) {
           console.error("Error syncing with backend:", error);
           if (mounted) {
-            // allow UI to show based on local state if backend check fails
+            // Allow UI to use local state if backend check fails.
+            hasCheckedBackendRegistration = true;
             setIsInitialized(true);
           }
         }
       } else {
-        // No backend API available — proceed using local state
-        if (mounted) setIsInitialized(true);
+        // No backend API available, proceed using local state.
+        if (mounted) {
+          hasCheckedBackendRegistration = true;
+          setIsInitialized(true);
+        }
       }
     };
 
-    syncWithBackend();
+    void syncWithBackend();
 
     return () => {
       mounted = false;

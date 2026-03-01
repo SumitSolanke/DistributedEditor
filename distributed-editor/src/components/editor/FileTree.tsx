@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -8,45 +8,75 @@ import {
   FileJson2,
   FileText,
   FileType2,
-  Pencil,
   Trash2,
-} from "lucide-react"
-import type { FileNode } from "../../types/editor.types"
-import { useEditorStore } from "../../store/editorStore"
+} from "lucide-react";
+import type { FileNode } from "../../types/editor.types";
+import { useEditorStore } from "../../store/editorStore";
+import { joinRelativePath } from "../../utils/projectTree";
 
 interface Props {
-  nodes: FileNode[]
+  nodes: FileNode[];
+  reloadProjectTree: () => Promise<void>;
+  onDeleteOpenProject?: () => Promise<void>;
 }
 
 type CtxState = {
-  open: boolean
-  x: number
-  y: number
-  node: FileNode | null
-}
+  open: boolean;
+  x: number;
+  y: number;
+  node: FileNode | null;
+};
 
 function getIconByName(name: string) {
-  const lower = name.toLowerCase()
-  if (lower.endsWith(".ts") || lower.endsWith(".tsx") || lower.endsWith(".js") || lower.endsWith(".jsx"))
-    return <FileCode2 size={14} />
-  if (lower.endsWith(".json")) return <FileJson2 size={14} />
-  if (lower.endsWith(".md")) return <FileText size={14} />
-  if (lower.endsWith(".css") || lower.endsWith(".html")) return <FileType2 size={14} />
-  return <FileIcon size={14} />
+  const lower = name.toLowerCase();
+  if (
+    lower.endsWith(".ts") ||
+    lower.endsWith(".tsx") ||
+    lower.endsWith(".js") ||
+    lower.endsWith(".jsx")
+  )
+    return <FileCode2 size={14} />;
+  if (lower.endsWith(".json")) return <FileJson2 size={14} />;
+  if (lower.endsWith(".md")) return <FileText size={14} />;
+  if (lower.endsWith(".css") || lower.endsWith(".html")) return <FileType2 size={14} />;
+  return <FileIcon size={14} />;
 }
 
-const FileTree = ({ nodes }: Props) => {
+const FileTree = ({ nodes, reloadProjectTree, onDeleteOpenProject }: Props) => {
   return (
     <div className="text-sm select-none">
       {nodes.map((node) => (
-        <FileNodeItem key={node.id} node={node} depth={0} />
+        <FileNodeItem
+          key={node.id}
+          node={node}
+          depth={0}
+          reloadProjectTree={reloadProjectTree}
+          onDeleteOpenProject={onDeleteOpenProject}
+        />
       ))}
     </div>
-  )
-}
+  );
+};
 
-const FileNodeItem = ({ node, depth }: { node: FileNode; depth: number }) => {
-  const [open, setOpen] = useState(true)
+const FileNodeItem = ({
+  node,
+  depth,
+  reloadProjectTree,
+  onDeleteOpenProject,
+}: {
+  node: FileNode;
+  depth: number;
+  reloadProjectTree: () => Promise<void>;
+  onDeleteOpenProject?: () => Promise<void>;
+}) => {
+  const [open, setOpen] = useState(true);
+  const [ctx, setCtx] = useState<CtxState>({
+    open: false,
+    x: 0,
+    y: 0,
+    node: null,
+  });
+  const [inputValue, setInputValue] = useState("");
 
   const {
     openFile,
@@ -54,77 +84,93 @@ const FileNodeItem = ({ node, depth }: { node: FileNode; depth: number }) => {
     setSelectedNodeId,
     explorerAction,
     startCreate,
-    startRename,
     clearExplorerAction,
-    addNodeWithName,
-    renameNodeSafe,
-    deleteNode,
     activeFileId,
-  } = useEditorStore()
+  } = useEditorStore();
 
-  const [ctx, setCtx] = useState<CtxState>({
-    open: false,
-    x: 0,
-    y: 0,
-    node: null,
-  })
-
-  const [inputValue, setInputValue] = useState("")
-  const inputRef = useRef<HTMLInputElement | null>(null)
-
-  const paddingLeft = useMemo(() => 8 + depth * 14, [depth])
-
-  const isSelected = selectedNodeId === node.id
-  const isActiveFile = node.type === "file" && activeFileId === node.id
-
-  const isRenameMode =
-    explorerAction?.mode === "rename" && explorerAction.nodeId === node.id
+  const isSelected = selectedNodeId === node.id;
+  const isActiveFile = node.type === "file" && activeFileId === node.id;
+  const isRoot = node.path === "";
 
   const isCreateModeForThisFolder =
     explorerAction?.mode === "create" &&
     node.type === "folder" &&
-    explorerAction.parentId === node.id
+    explorerAction.parentId === node.id;
+
+  const paddingLeft = useMemo(() => 8 + depth * 14, [depth]);
 
   useEffect(() => {
-    const close = () => setCtx((s) => ({ ...s, open: false, node: null }))
-    window.addEventListener("click", close)
-    window.addEventListener("scroll", close, true)
+    const close = () => setCtx((s) => ({ ...s, open: false, node: null }));
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
     return () => {
-      window.removeEventListener("click", close)
-      window.removeEventListener("scroll", close, true)
-    }
-  }, [])
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, []);
 
   const onContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault()
-    setCtx({ open: true, x: e.clientX, y: e.clientY, node })
-    setSelectedNodeId(node.id)
-  }
+    e.preventDefault();
+    setCtx({ open: true, x: e.clientX, y: e.clientY, node });
+    setSelectedNodeId(node.id);
+  };
 
-  const submitRename = () => {
-    const res = renameNodeSafe(node.id, inputValue)
-    if (!res.ok) {
-      alert(res.reason)
-      return
+  const submitCreate = async () => {
+    if (!explorerAction || explorerAction.mode !== "create") return;
+    const name = inputValue.trim();
+    if (!name) {
+      alert("Name cannot be empty.");
+      return;
     }
-    clearExplorerAction()
-  }
 
-  const submitCreate = () => {
-    if (!explorerAction || explorerAction.mode !== "create") return
-    const res = addNodeWithName(explorerAction.parentId, explorerAction.nodeType, inputValue)
-    if (!res.ok) {
-      alert(res.reason)
-      return
+    const relativePath = joinRelativePath(node.path || "", name);
+    try {
+      if (explorerAction.nodeType === "file") {
+        await window.api?.createFile?.({ relativePath });
+      } else {
+        await window.api?.createFolder?.({ relativePath });
+      }
+      clearExplorerAction();
+      await reloadProjectTree();
+    } catch (error) {
+      console.error("Create operation failed:", error);
+      alert("Unable to create item.");
     }
-    clearExplorerAction()
-  }
+  };
 
-  const cancelAction = () => clearExplorerAction()
+  const onDelete = async () => {
+    if (isRoot) return;
+    try {
+      if (node.type === "file") {
+        await window.api?.deleteFile?.({ relativePath: node.path || "" });
+      } else {
+        await window.api?.deleteFolder?.({ relativePath: node.path || "" });
+      }
+      await reloadProjectTree();
+    } catch (error) {
+      console.error("Delete operation failed:", error);
+      alert("Unable to delete item.");
+    }
+  };
+
+  const openFileFromBackend = async () => {
+    if (node.type !== "file") return;
+    const relativePath = node.path || "";
+    try {
+      const content = (await window.api?.readFile?.({ relativePath })) || "";
+      openFile({ ...node, content });
+      setSelectedNodeId(node.id);
+    } catch (error) {
+      console.error("readFile failed:", error);
+      alert("Unable to read file.");
+    }
+  };
+
+  const cancelAction = () => clearExplorerAction();
 
   const rowClass = `flex items-center gap-1 cursor-pointer px-2 py-1 ${
     isSelected ? "bg-gray-700" : "hover:bg-gray-700"
-  } ${isActiveFile ? "border-l-2 border-[#007acc]" : "border-l-2 border-transparent"}`
+  } ${isActiveFile ? "border-l-2 border-[#007acc]" : "border-l-2 border-transparent"}`;
 
   if (node.type === "folder") {
     return (
@@ -133,39 +179,41 @@ const FileNodeItem = ({ node, depth }: { node: FileNode; depth: number }) => {
           className={rowClass}
           style={{ paddingLeft }}
           onClick={() => {
-            setOpen(!open)
-            setSelectedNodeId(node.id)
+            setOpen(!open);
+            setSelectedNodeId(node.id);
           }}
           onContextMenu={onContextMenu}
         >
+          {isRoot ? (
+            <button
+              title="Delete Open Project"
+              className="p-0.5 rounded hover:bg-red-700/40 text-red-300"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                void onDeleteOpenProject?.();
+              }}
+            >
+              <Trash2 size={13} />
+            </button>
+          ) : null}
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <Folder size={14} />
-
-          {isRenameMode ? (
-            <input
-              key={`rename-${node.id}-${node.name}`}
-              ref={inputRef}
-              autoFocus
-              defaultValue={node.name}
-              onChange={(e) => setInputValue(e.target.value)}
-              onBlur={submitRename}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submitRename()
-                if (e.key === "Escape") cancelAction()
-              }}
-              className="bg-[#1e1e1e] border border-gray-600 rounded px-2 py-1 text-sm w-full outline-none"
-            />
-          ) : (
-            <span>{node.name}</span>
-          )}
+          <span>{node.name}</span>
         </div>
 
         {open && node.children && (
           <div>
             {node.children.map((child) => (
-              <FileNodeItem key={child.id} node={child} depth={depth + 1} />
-            ))}
-          </div>
+                <FileNodeItem
+                  key={child.id}
+                  node={child}
+                  depth={depth + 1}
+                  reloadProjectTree={reloadProjectTree}
+                  onDeleteOpenProject={onDeleteOpenProject}
+                />
+              ))}
+            </div>
         )}
 
         {open && isCreateModeForThisFolder && (
@@ -183,10 +231,10 @@ const FileNodeItem = ({ node, depth }: { node: FileNode; depth: number }) => {
                   : "newFile.ts"
               }
               onChange={(e) => setInputValue(e.target.value)}
-              onBlur={submitCreate}
+              onBlur={() => void submitCreate()}
               onKeyDown={(e) => {
-                if (e.key === "Enter") submitCreate()
-                if (e.key === "Escape") cancelAction()
+                if (e.key === "Enter") void submitCreate();
+                if (e.key === "Escape") cancelAction();
               }}
               className="bg-[#1e1e1e] border border-gray-600 rounded px-2 py-1 text-sm w-full outline-none"
             />
@@ -198,46 +246,26 @@ const FileNodeItem = ({ node, depth }: { node: FileNode; depth: number }) => {
             x={ctx.x}
             y={ctx.y}
             node={ctx.node}
+            hideDelete={isRoot}
             onNewFile={() => startCreate(node.id, "file")}
             onNewFolder={() => startCreate(node.id, "folder")}
-            onRename={() => startRename(node.id)}
-            onDelete={() => deleteNode(node.id)}
+            onDelete={() => void onDelete()}
           />
         )}
       </div>
-    )
+    );
   }
 
-  // FILE NODE
   return (
     <div className="relative">
       <div
         className={rowClass}
         style={{ paddingLeft: paddingLeft + 18 }}
-        onClick={() => {
-          setSelectedNodeId(node.id)
-          openFile(node)
-        }}
+        onClick={() => void openFileFromBackend()}
         onContextMenu={onContextMenu}
       >
         {getIconByName(node.name)}
-
-        {isRenameMode ? (
-          <input
-            key={`rename-${node.id}-${node.name}`}
-            autoFocus
-            defaultValue={node.name}
-            onChange={(e) => setInputValue(e.target.value)}
-            onBlur={submitRename}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submitRename()
-              if (e.key === "Escape") cancelAction()
-            }}
-            className="bg-[#1e1e1e] border border-gray-600 rounded px-2 py-1 text-sm w-full outline-none"
-          />
-        ) : (
-          <span className={`${isActiveFile ? "text-[#cce8ff]" : ""}`}>{node.name}</span>
-        )}
+        <span className={isActiveFile ? "text-[#cce8ff]" : ""}>{node.name}</span>
       </div>
 
       {ctx.open && ctx.node?.id === node.id && (
@@ -248,13 +276,12 @@ const FileNodeItem = ({ node, depth }: { node: FileNode; depth: number }) => {
           hideCreate
           onNewFile={() => {}}
           onNewFolder={() => {}}
-          onRename={() => startRename(node.id)}
-          onDelete={() => deleteNode(node.id)}
+          onDelete={() => void onDelete()}
         />
       )}
     </div>
-  )
-}
+  );
+};
 
 function ContextMenu({
   x,
@@ -262,18 +289,18 @@ function ContextMenu({
   node,
   onNewFile,
   onNewFolder,
-  onRename,
   onDelete,
   hideCreate,
+  hideDelete,
 }: {
-  x: number
-  y: number
-  node: FileNode
-  onNewFile: () => void
-  onNewFolder: () => void
-  onRename: () => void
-  onDelete: () => void
-  hideCreate?: boolean
+  x: number;
+  y: number;
+  node: FileNode;
+  onNewFile: () => void;
+  onNewFolder: () => void;
+  onDelete: () => void;
+  hideCreate?: boolean;
+  hideDelete?: boolean;
 }) {
   return (
     <div
@@ -288,25 +315,20 @@ function ContextMenu({
           <button className="w-full text-left px-3 py-2 hover:bg-gray-700" onClick={onNewFolder}>
             New Folder
           </button>
-          <div className="h-px bg-gray-700" />
+          {!hideDelete ? <div className="h-px bg-gray-700" /> : null}
         </>
       )}
 
-      <button
-        className="w-full text-left px-3 py-2 hover:bg-gray-700 flex items-center gap-2"
-        onClick={onRename}
-      >
-        <Pencil size={14} /> Rename
-      </button>
-
-      <button
-        className="w-full text-left px-3 py-2 hover:bg-gray-700 text-red-300 flex items-center gap-2"
-        onClick={onDelete}
-      >
-        <Trash2 size={14} /> Delete
-      </button>
+      {!hideDelete ? (
+        <button
+          className="w-full text-left px-3 py-2 hover:bg-gray-700 text-red-300 flex items-center gap-2"
+          onClick={onDelete}
+        >
+          <Trash2 size={14} /> Delete
+        </button>
+      ) : null}
     </div>
-  )
+  );
 }
 
-export default FileTree
+export default FileTree;
