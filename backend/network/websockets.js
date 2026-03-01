@@ -36,10 +36,11 @@ export function syncWithDevice(ip) {
     console.warn("syncWithDevice skipped: no registered self user");
     return;
   }
-
+  console.log(`Attempting WebSocket connection to ws://${ip}:${PORT}...`);
   const socket = new WebSocket(`ws://${ip}:${PORT}`);
 
   socket.on("open", () => {
+    console.log(`WebSocket connection established with ${ip}`);
     socket.send(
       JSON.stringify({
         type: "SYNC_DEVICES",
@@ -47,6 +48,7 @@ export function syncWithDevice(ip) {
         payload: getFullListIncludingSelf(),
       }),
     );
+    console.log(`SYNC_DEVICES message sent to ${ip}`);
   });
 
   socket.on("message", (data) => {
@@ -55,6 +57,7 @@ export function syncWithDevice(ip) {
 
       if (message.type === "SYNC_RESPONSE") {
         mergeDevices(message.payload);
+        console.log(`Received and merged SYNC_RESPONSE from ${ip}`);
       }
     } catch {
       console.log("Invalid message received");

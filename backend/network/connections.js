@@ -59,7 +59,9 @@ export function registerHandlers() {
   ipcMain.handle("connectDevice", async (event, device) => {
     try {
       device = device.trim();
+      console.log("Attempting to connect to device at IP:", device);
       syncWithDevice(device);
+      console.log("Connection initiated to device at IP:", device);
       return { success: true };
     } catch (e) {
       console.error("IPC connectDevice error:", e);

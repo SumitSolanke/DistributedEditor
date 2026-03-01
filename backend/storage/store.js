@@ -48,6 +48,7 @@ export function getFullListIncludingSelf() {
 }
 
 export function mergeDevices(receivedDevices) {
+  console.log("Merging devices. Received devices:", receivedDevices);
   const existing = getDeviceList();
   const self = getSelf();
   const selfId = self?.id;
