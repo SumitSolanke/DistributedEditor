@@ -3,84 +3,65 @@ import RegisterPage from "./pages/RegisterPage";
 import { useAuthStore } from "./store/authStore";
 import { useEffect, useState } from "react";
 
-let hasCheckedBackendRegistration = false;
+const BACKEND_USER_CHECK_KEY = "dce-backend-user-check-done";
+
+function hasCheckedBackendThisSession() {
+  return sessionStorage.getItem(BACKEND_USER_CHECK_KEY) === "1";
+}
+
+function markBackendCheckedThisSession() {
+  sessionStorage.setItem(BACKEND_USER_CHECK_KEY, "1");
+}
 
 export default function App() {
   const isRegistered = useAuthStore((s) => s.isRegistered);
+  const register = useAuthStore((s) => s.register);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // On app startup, sync frontend auth state with backend
   useEffect(() => {
     let mounted = true;
 
-    const syncWithBackend = async () => {
-      if (hasCheckedBackendRegistration) {
+    const initAuth = async () => {
+      if (isRegistered || hasCheckedBackendThisSession()) {
         if (mounted) setIsInitialized(true);
         return;
       }
 
-      console.log("App mounted - syncing with backend...");
-
-      // Load any persisted frontend auth state so UI can render quickly
-      try {
-        const persisted = localStorage.getItem("dce-auth");
-        if (persisted) {
-          try {
-            const parsed = JSON.parse(persisted);
-            // Zustand persist payload shape: { state, version }
-            if (parsed && parsed.state) {
-              useAuthStore.setState({
-                user: parsed.state.user ?? null,
-                isRegistered: Boolean(parsed.state.isRegistered),
-              });
-            }
-          } catch (e) {
-            console.warn("Failed to parse persisted auth", e);
-          }
-        }
-      } catch {
-        // ignore localStorage access errors
+      const getRegisteredUser = window.api?.getRegisteredUser;
+      if (typeof getRegisteredUser !== "function") {
+        markBackendCheckedThisSession();
+        if (mounted) setIsInitialized(true);
+        return;
       }
 
-      // Then verify backend-known registration state when possible
-      if (window.api && typeof window.api.isUserRegistered === "function") {
-        try {
-          const backendHasUser = await window.api.isUserRegistered();
-          console.log("Backend has user:", backendHasUser);
+      try {
+        const result = await getRegisteredUser();
+        if (!mounted) return;
 
-          if (mounted) {
-            if (!backendHasUser) {
-              // Backend has no user, clear frontend auth
-              console.log("Backend has no user - clearing frontend auth");
-              localStorage.removeItem("dce-auth");
-              useAuthStore.setState({ user: null, isRegistered: false });
-            }
-            hasCheckedBackendRegistration = true;
-            setIsInitialized(true);
-          }
-        } catch (error) {
-          console.error("Error syncing with backend:", error);
-          if (mounted) {
-            // Allow UI to use local state if backend check fails.
-            hasCheckedBackendRegistration = true;
-            setIsInitialized(true);
-          }
+        if (result?.success && result.user) {
+          register({
+            name: result.user.name || "",
+            ip: result.user.ip || "",
+            email: result.user.email || "",
+          });
+        } else {
+          useAuthStore.setState({ user: null, isRegistered: false });
         }
-      } else {
-        // No backend API available, proceed using local state.
-        if (mounted) {
-          hasCheckedBackendRegistration = true;
-          setIsInitialized(true);
-        }
+      } catch (error) {
+        console.error("Startup backend user sync failed:", error);
+      } finally {
+        if (!mounted) return;
+        markBackendCheckedThisSession();
+        setIsInitialized(true);
       }
     };
 
-    void syncWithBackend();
+    void initAuth();
 
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [isRegistered, register]);
 
   if (!isInitialized) return null;
 

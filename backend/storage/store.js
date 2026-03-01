@@ -1,65 +1,75 @@
 import Store from "electron-store";
+import { randomUUID } from "crypto";
 
-const user = new Store({ name: "user-data" });
-const devices = new Store({ name: "devices" });
-devices.set("list", []);
+export const user = new Store({ name: "user-data" });
+export const devices = new Store({ name: "devices-data" });
 
-function isDuplicateDevice(email) {
-  const list = devices.get("list") || [];
-
-  return list.some(
-    (device) => device.email.toLowerCase() === email.toLowerCase(),
-  );
+if (!devices.has("list")) {
+  devices.set("list", []);
+}
+if (!devices.has("version")) {
+  devices.set("version", 0);
 }
 
-function addDevice(newDevice) {
-  console.log("device added to network list as well");
-  const list = devices.get("list") || [];
+export function registerSelf(data) {
+  const selfDevice = {
+    id: randomUUID(),
+    name: data.name,
+    email: data.email,
+    ip: data.ip,
+  };
 
-  if (isDuplicateDevice(newDevice.email)) {
-    console.log("Device with this email already exists");
-    return false;
-  }
-
-  list.push(newDevice);
-
-  // Sort alphabetically by email
-  list.sort((a, b) =>
-    a.email.toLowerCase().localeCompare(b.email.toLowerCase()),
-  );
-
-  devices.set("list", list);
-
-  return true;
+  user.set("self", selfDevice);
+  return selfDevice;
 }
 
-function mergeDevices(newDevicesArray) {
-  const existingList = devices.get("list") || [];
-  const newlyAdded = [];
+export function hasSelf() {
+  return user.has("self");
+}
 
-  newDevicesArray.forEach((newDevice) => {
-    const isDuplicate = existingList.some(
-      (device) => device.email.toLowerCase() === newDevice.email.toLowerCase(),
-    );
+export function deleteSelf() {
+  user.delete("self");
+  console.log("Backend: self info deleted");
+  return { success: true };
+}
 
-    if (!isDuplicate) {
-      existingList.push(newDevice);
-      newlyAdded.push(newDevice);
+export function getSelf() {
+  return user.get("self");
+}
+
+export function getDeviceList() {
+  return devices.get("list") || [];
+}
+
+export function getFullListIncludingSelf() {
+  const self = getSelf();
+  const list = getDeviceList();
+  return self ? [self, ...list] : [...list];
+}
+
+export function mergeDevices(receivedDevices) {
+  const existing = getDeviceList();
+  const self = getSelf();
+  const selfId = self?.id;
+
+  let changed = false;
+
+  (receivedDevices || []).forEach((incoming) => {
+    if (!incoming?.id) return;
+    if (selfId && incoming.id === selfId) return;
+
+    const exists = existing.some((d) => d.id === incoming.id);
+
+    if (!exists) {
+      existing.push(incoming);
+      changed = true;
     }
   });
 
-  // If nothing added → return null
-  if (newlyAdded.length === 0) {
-    return null;
+  if (changed) {
+    devices.set("list", existing);
+    devices.set("version", devices.get("version") + 1);
   }
 
-  // Sort alphabetically by email
-  existingList.sort((a, b) =>
-    a.email.toLowerCase().localeCompare(b.email.toLowerCase()),
-  );
-
-  devices.set("list", existingList);
-
-  return newlyAdded;
+  return changed;
 }
-export { user, devices, addDevice, isDuplicateDevice, mergeDevices };

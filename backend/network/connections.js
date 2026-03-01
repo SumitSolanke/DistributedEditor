@@ -1,36 +1,33 @@
-import { user, addDevice, devices } from "../storage/store.js";
+import {
+  registerSelf,
+  hasSelf,
+  deleteSelf,
+  getFullListIncludingSelf,
+  getSelf,
+} from "../storage/store.js";
 import { ipcMain } from "electron/main";
-import { sendDeviceListToDevice } from "./websockets.js";
+import { syncWithDevice } from "./websockets.js";
 
 export function registerUser(data) {
-  user.set("userInfo", data);
-  addDevice(data);
-  console.log("Backend: user registered", data?.name ?? "(no name)");
+  registerSelf(data);
+  console.log(data);
   return { success: true };
 }
 
-/**
- * Check whether a user is registered in the backend store.
- * @returns {boolean}
- */
 export function isUserRegistered() {
-  const has = user.has("userInfo");
-  console.log("Backend: isUserRegistered ->", has);
-  return has;
+  return hasSelf();
 }
 
-/**
- * Optional cleanup helper: delete stored user info.
- * Intended to be called by backend on application shutdown during development.
- */
+export function getRegisteredUserData() {
+  return getSelf() || null;
+}
+
 export function deleteUser() {
-  user.delete("userInfo");
-  console.log("Backend: user info deleted");
+  deleteSelf();
   return { success: true };
 }
 
 export function registerHandlers() {
-  // IPC: expose minimal backend user API for renderer
   ipcMain.handle("isUserRegistered", async () => {
     try {
       return Boolean(isUserRegistered());
@@ -40,10 +37,19 @@ export function registerHandlers() {
     }
   });
 
+  ipcMain.handle("getRegisteredUser", async () => {
+    try {
+      const user = getRegisteredUserData();
+      return { success: true, user };
+    } catch (e) {
+      console.error("IPC getRegisteredUser error:", e);
+      return { success: false, user: null, error: String(e) };
+    }
+  });
+
   ipcMain.handle("userRegistration", async (event, data) => {
     try {
-      const res = registerUser(data);
-      return res;
+      return registerUser(data);
     } catch (e) {
       console.error("IPC userRegistration error:", e);
       return { success: false, error: String(e) };
@@ -52,9 +58,8 @@ export function registerHandlers() {
 
   ipcMain.handle("connectDevice", async (event, device) => {
     try {
-      console.log("Connect to Device");
       device = device.trim();
-      await sendDeviceListToDevice(device);
+      syncWithDevice(device);
       return { success: true };
     } catch (e) {
       console.error("IPC connectDevice error:", e);
@@ -64,7 +69,7 @@ export function registerHandlers() {
 
   ipcMain.handle("getConnections", async () => {
     try {
-      const list = devices.get("list") || [];
+      const list = getFullListIncludingSelf();
       return { success: true, connections: list };
     } catch (e) {
       console.error("IPC getConnections error:", e);
@@ -76,6 +81,7 @@ export function registerHandlers() {
 export default {
   registerUser,
   isUserRegistered,
+  getRegisteredUserData,
   deleteUser,
   registerHandlers,
 };

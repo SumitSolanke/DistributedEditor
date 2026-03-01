@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Menu, ipcMain } from "electron/main";
 import connections from "./network/connections.js";
 import files from "./fileHandling/fileOperations.js";
-import { sendDeviceListToAll } from "./network/websockets.js";
+import { broadcastToAll } from "./network/websockets.js";
 import { user as userStore, devices } from "./storage/store.js";
 import { registerProjectHandlers } from "./fileHandling/project.js";
 import path from "node:path";
@@ -31,13 +31,10 @@ app.whenReady().then(() => {
   registerProjectHandlers();
   createWindow();
   try {
-    sendDeviceListToAll();
+    broadcastToAll();
   } catch (e) {
-    // if sendDeviceListToAll is not available, ignore
-    console.warn(
-      "sendDeviceListToAll not available at startup:",
-      e?.message || e,
-    );
+    // if broadcastToAll is not available, ignore
+    console.warn("broadcastToAll not available at startup:", e?.message || e);
   }
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

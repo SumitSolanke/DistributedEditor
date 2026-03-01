@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("api", {
   sendUserData: (data) => ipcRenderer.invoke("userRegistration", data),
   isUserRegistered: () => ipcRenderer.invoke("isUserRegistered"),
+  getRegisteredUser: () => ipcRenderer.invoke("getRegisteredUser"),
   connectDevice: (device) => ipcRenderer.invoke("connectDevice", device),
   getConnections: () => ipcRenderer.invoke("getConnections"),
   createFile: (data) => ipcRenderer.invoke("createFile", data),
@@ -17,5 +18,4 @@ contextBridge.exposeInMainWorld("api", {
   deleteProject: (data) => ipcRenderer.invoke("delete-project", data),
   addConnection: (data) => ipcRenderer.invoke("add-connection", data),
   removeConnection: (data) => ipcRenderer.invoke("remove-connection", data),
-  // Note: clearing user data is handled by the backend on app shutdown for development.
 });

@@ -4,6 +4,10 @@ export interface UserData {
   email: string;
 }
 
+export interface RegisteredUserData extends UserData {
+  id?: string;
+}
+
 export interface ConnectionItem {
   id?: string;
   name?: string;
@@ -28,6 +32,11 @@ export interface BackendProjectNode {
 export interface ElectronAPI {
   sendUserData: (data: UserData) => Promise<void>;
   isUserRegistered: () => Promise<boolean>;
+  getRegisteredUser: () => Promise<{
+    success: boolean;
+    user?: RegisteredUserData | null;
+    error?: string;
+  }>;
   connectDevice?: (device: string) => Promise<{ success: boolean }>;
   getConnections?: () => Promise<{
     success: boolean;

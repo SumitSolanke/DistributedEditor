@@ -1,106 +1,97 @@
 import WebSocket, { WebSocketServer } from "ws";
-import { devices, mergeDevices, addDevice } from "../storage/store.js";
+import {
+  getSelf,
+  getFullListIncludingSelf,
+  mergeDevices,
+  getDeviceList,
+} from "../storage/store.js";
+
 const PORT = 3000;
 const wss = new WebSocketServer({ port: PORT });
 
-wss.on("connection", (socket, request) => {
-  console.log("Incoming connection from:", request.socket.remoteAddress);
-
+wss.on("connection", (socket) => {
   socket.on("message", (data) => {
     const message = JSON.parse(data.toString());
 
-    if (message.type === "DEVICE_LIST") {
-      console.log("Received device list");
-      const myList = devices.get("list") || [];
+    if (message.type === "SYNC_DEVICES") {
+      const changed = mergeDevices(message.payload);
+
       socket.send(
         JSON.stringify({
-          type: "DEVICE_LIST_RESPONSE",
-          payload: myList,
+          type: "SYNC_RESPONSE",
+          payload: getFullListIncludingSelf(),
         }),
       );
-      const newlyAdded = mergeDevices(message.payload);
-      if (newlyAdded && newlyAdded.length > 0) {
-        sendDeviceListToAll(); // Update all devices with the new list
+
+      if (changed) {
+        broadcastToAll(message.originId);
       }
     }
   });
 });
 
-export async function sendDeviceListToDevice(ip) {
-  const myDeviceList = devices.get("list") || [];
+export function syncWithDevice(ip) {
+  const self = getSelf();
+  if (!self) {
+    console.warn("syncWithDevice skipped: no registered self user");
+    return;
+  }
+
   const socket = new WebSocket(`ws://${ip}:${PORT}`);
 
   socket.on("open", () => {
     socket.send(
       JSON.stringify({
-        type: "DEVICE_LIST",
-        payload: myDeviceList,
+        type: "SYNC_DEVICES",
+        originId: self.id,
+        payload: getFullListIncludingSelf(),
       }),
     );
   });
+
   socket.on("message", (data) => {
     try {
       const message = JSON.parse(data.toString());
 
-      if (message.type === "DEVICE_LIST_RESPONSE") {
-        console.log("Received response from");
-
+      if (message.type === "SYNC_RESPONSE") {
         mergeDevices(message.payload);
-
-        // ✅ Close ONLY after receiving response
-        socket.close();
       }
-    } catch (err) {
-      console.log("Invalid message from");
+    } catch {
+      console.log("Invalid message received");
+    } finally {
+      socket.close();
     }
   });
-  socket.on("close", () => {
-    console.log("Connection closed with");
+
+  socket.on("error", () => {
+    socket.close();
   });
 }
-export function sendDeviceListToAll() {
-  const myDeviceList = devices.get("list") || [];
 
-  const knownDevices = devices.get("list") || [];
+export function broadcastToAll(excludeId = "__NONE__") {
+  const self = getSelf();
+  if (!self) return;
 
-  knownDevices.forEach((device) => {
-    if (!device.ip) return;
+  const list = getDeviceList();
+
+  list.forEach((device) => {
+    if (device.id === excludeId) return;
 
     const socket = new WebSocket(`ws://${device.ip}:${PORT}`);
 
     socket.on("open", () => {
-      console.log("Connected to", device.email);
-
       socket.send(
         JSON.stringify({
-          type: "DEVICE_LIST",
-          payload: myDeviceList,
+          type: "SYNC_DEVICES",
+          originId: self.id,
+          payload: getFullListIncludingSelf(),
         }),
       );
+      socket.close();
     });
 
-    socket.on("message", (data) => {
-      try {
-        const message = JSON.parse(data.toString());
-
-        if (message.type === "DEVICE_LIST_RESPONSE") {
-          console.log("Received response from", device.email);
-
-          mergeDevices(message.payload);
-
-          // ✅ Close ONLY after receiving response
-          socket.close();
-        }
-      } catch (err) {
-        console.log("Invalid message from", device.email);
-      }
-    });
-
-    socket.on("error", (err) => {
-      console.log("Could not connect to", device.email);
-    });
-    socket.on("close", () => {
-      console.log("Connection closed with", device.email);
+    socket.on("error", () => {
+      socket.close();
     });
   });
 }
