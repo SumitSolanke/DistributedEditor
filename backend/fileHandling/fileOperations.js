@@ -3,6 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { app } from "electron";
 import store from "../storage/project.js";
+import { getSelf } from "../storage/store.js";
+import { initializeGitForNewProject } from "./gitManager.js";
 
 const userDataPath = app.getPath("userData");
 console.log("User data path:", userDataPath);
@@ -18,7 +20,9 @@ function getProjectRoot() {
 }
 
 export function setCurrentProject(projectName) {
-  const safeProjectName = typeof projectName === "string" ? projectName.trim() : "";
+  const safeProjectName = typeof (projectName === "string"
+    ? projectName.trim()
+    : "");
   const projects = store.get("projects", {});
   if (!safeProjectName || !projects[safeProjectName]) {
     throw new Error("Project not found");
@@ -160,6 +164,8 @@ export async function addProjectFolder(projectName) {
   const projectPath = path.join(projectsRoot, safeProjectName);
   try {
     await fs.mkdir(projectPath, { recursive: false });
+    const userEmail = getSelf().email || "";
+    await initializeGitForNewProject(projectPath, userEmail);
   } catch (error) {
     if (
       error &&

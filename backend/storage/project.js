@@ -1,88 +1,184 @@
 // main/store.js
 import { ipcMain } from "electron";
 import Store from "electron-store";
+import { v4 as uuidv4 } from "uuid";
+import { getSelf } from "./store.js";
 
 const store = new Store({
   name: "project",
   defaults: {
-    projects: {},
+    projects: [],
   },
 });
 
 export default store;
 
-export function addProject(projectName, connections = []) {
+export function addProject(projectName, connections = [], isPublic = false) {
   if (typeof projectName !== "string" || !projectName.trim()) {
     throw new Error("Project name is required");
   }
+
   const safeProjectName = projectName.trim();
   const projects = store.get("projects");
 
-  if (projects[safeProjectName]) {
+  if (projects.find((p) => p.name === safeProjectName)) {
     throw new Error("Project already exists");
   }
 
-  projects[safeProjectName] = {
-    connections: connections.map((conn) => ({
-      username: conn.username,
-      ip: conn.ip,
+  const self = getSelf(); // { username, email, ip }
+  const projectId = uuidv4();
+
+  const allMembers = [
+    self,
+    ...connections.map((conn) => ({
+      username: conn.name,
       email: conn.email,
+      ip: conn.ip,
     })),
+  ];
+
+  const newProject = {
+    id: projectId,
+    name: safeProjectName,
+    owner: self,
+    members: allMembers,
+    public: isPublic,
+    branches: {
+      "global-main": {
+        owner: self.email,
+        visibility: "public",
+      },
+      [`${self.email}/local-main`]: {
+        owner: self.email,
+        visibility: isPublic ? "public" : "private",
+      },
+    },
   };
 
+  projects.push(newProject);
   store.set("projects", projects);
-  return true;
+
+  return projectId;
 }
 
 export function getProjects() {
-  const projects = store.get("projects");
-  return Object.keys(projects);
+  return store.get("projects");
 }
 
-export function deleteProject(projectName) {
+export function getProjectById(projectId) {
   const projects = store.get("projects");
+  return projects.find((p) => p.id === projectId);
+}
 
-  if (!projects[projectName]) return;
-
-  delete projects[projectName];
-
+export function deleteProject(projectId) {
+  let projects = store.get("projects");
+  projects = projects.filter((p) => p.id !== projectId);
   store.set("projects", projects);
 }
 
-export function addConnection(projectName, connectionData) {
+export function setProjectPublic(projectId) {
   const projects = store.get("projects");
+  const project = projects.find((p) => p.id === projectId);
 
-  if (!projects[projectName]) {
-    console.log("Project not found");
-    return;
+  if (!project) throw new Error("Project not found");
+
+  if (project.public) {
+    return; // already public
   }
 
-  const exists = projects[projectName].connections.find(
-    (conn) => conn.email === connectionData.email,
-  );
+  project.public = true;
 
-  if (exists) {
-    console.log("Connection already exists");
-    return;
-  }
-
-  projects[projectName].connections.push({
-    username: connectionData.username,
-    ip: connectionData.ip,
-    email: connectionData.email,
+  // When project becomes public:
+  // All local-main branches become public
+  Object.keys(project.branches).forEach((branchName) => {
+    if (branchName.endsWith("local-main")) {
+      project.branches[branchName].visibility = "public";
+    }
   });
 
   store.set("projects", projects);
 }
 
-export function removeConnection(projectName, email) {
+export function registerBranch(projectId, branchName, visibility = "private") {
   const projects = store.get("projects");
+  const project = projects.find((p) => p.id === projectId);
+  const self = getSelf();
 
-  if (!projects[projectName]) return;
+  if (!project) throw new Error("Project not found");
 
-  projects[projectName].connections = projects[projectName].connections.filter(
-    (conn) => conn.email !== email,
-  );
+  if (project.branches[branchName]) {
+    throw new Error("Branch already exists in metadata");
+  }
+
+  // Public branches cannot exist if project is private
+  if (visibility === "public" && !project.public) {
+    throw new Error("Cannot create public branch in private project");
+  }
+
+  project.branches[branchName] = {
+    owner: self.email,
+    visibility,
+  };
+
+  store.set("projects", projects);
+}
+
+export function deleteBranch(projectId, branchName) {
+  const projects = store.get("projects");
+  const project = projects.find((p) => p.id === projectId);
+  const self = getSelf();
+  const requesterEmail = self.email;
+  if (!project) throw new Error("Project not found");
+
+  const branch = project.branches[branchName];
+
+  if (!branch) throw new Error("Branch not found");
+
+  if (branch.visibility === "public") {
+    throw new Error("Public branches cannot be deleted");
+  }
+
+  if (branch.owner !== requesterEmail) {
+    throw new Error("Only branch owner can delete this branch");
+  }
+
+  if (branchName === "global-main") {
+    throw new Error("global-main branch cannot be deleted");
+  }
+
+  if (branchName.endsWith("local-main")) {
+    throw new Error("local-main branches cannot be deleted");
+  }
+
+  delete project.branches[branchName];
+
+  store.set("projects", projects);
+}
+
+export function setBranchPublic(projectId, branchName) {
+  const projects = store.get("projects");
+  const project = projects.find((p) => p.id === projectId);
+  const self = getSelf();
+  const requesterEmail = self.email;
+  if (!project) throw new Error("Project not found");
+
+  if (!project.public) {
+    throw new Error("Project must be public before branch can be public");
+  }
+
+  const branch = project.branches[branchName];
+
+  if (!branch) throw new Error("Branch not found");
+
+  if (branch.owner !== requesterEmail) {
+    throw new Error("Only branch owner can make it public");
+  }
+
+  if (branch.visibility === "public") {
+    return; // already public
+  }
+
+  branch.visibility = "public";
 
   store.set("projects", projects);
 }

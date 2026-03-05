@@ -4,8 +4,7 @@ import {
   addProject,
   getProjects,
   deleteProject,
-  addConnection,
-  removeConnection,
+  setProjectPublic,
 } from "../storage/project.js";
 import { addProjectFolder, deleteProjectFolder } from "./fileOperations.js";
 
@@ -14,9 +13,9 @@ export function registerProjectHandlers() {
     let projectAdded = false;
     const projectName = data?.projectName;
     try {
-      const { connections } = data;
+      const { connections, isPublic } = data;
 
-      addProject(projectName, connections || []);
+      addProject(projectName, connections || [], isPublic || false);
       projectAdded = true;
       await addProjectFolder(projectName);
       return { success: true };
@@ -43,34 +42,21 @@ export function registerProjectHandlers() {
 
   ipcMain.handle("delete-project", async (event, data) => {
     try {
-      const { projectName } = data;
+      const { projectName, id } = data;
 
       await deleteProjectFolder(projectName);
-      deleteProject(projectName);
+      deleteProject(id);
       return { success: true };
     } catch (error) {
       return { success: false, message: error.message };
     }
   });
 
-  ipcMain.handle("add-connection", async (event, data) => {
+  ipcMain.handle("set-project-public", async (event, data) => {
     try {
-      const { projectName, connection } = data;
+      const { id } = data;
 
-      addConnection(projectName, connection);
-
-      return { success: true };
-    } catch (error) {
-      return { success: false, message: error.message };
-    }
-  });
-
-  ipcMain.handle("remove-connection", async (event, data) => {
-    try {
-      const { projectName, email } = data;
-
-      removeConnection(projectName, email);
-
+      setProjectPublic(id);
       return { success: true };
     } catch (error) {
       return { success: false, message: error.message };

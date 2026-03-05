@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("api", {
   addProject: (data) => ipcRenderer.invoke("add-project", data),
   getProjects: () => ipcRenderer.invoke("get-projects"),
   deleteProject: (data) => ipcRenderer.invoke("delete-project", data),
-  addConnection: (data) => ipcRenderer.invoke("add-connection", data),
-  removeConnection: (data) => ipcRenderer.invoke("remove-connection", data),
+  setProjectPublic: (data) => ipcRenderer.invoke("set-project-public", data),
+  registerBranch: (data) => ipcRenderer.invoke("register-branch", data),
+  deleteBranch: (data) => ipcRenderer.invoke("delete-branch", data),
 });
