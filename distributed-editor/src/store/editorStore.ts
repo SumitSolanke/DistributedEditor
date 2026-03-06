@@ -5,12 +5,16 @@ import type {
   FileNode,
   SidebarView,
 } from "../types/editor.types";
+import type { BranchMetadata } from "../types/project.types";
 
-interface ProjectInfo {
+export interface ProjectInfo {
   id: string;
   name: string;
   connections: string[];
   rootPath?: string;
+  public?: boolean;
+  ownerEmail?: string;
+  branches?: Record<string, BranchMetadata>;
 }
 
 interface EditorState {
@@ -22,6 +26,7 @@ interface EditorState {
   currentProject: ProjectInfo | null;
   createProject: (project: ProjectInfo, initialTree?: FileNode[]) => void;
   openProject: (project: ProjectInfo, tree: FileNode[]) => void;
+  updateCurrentProjectMeta: (project: Partial<ProjectInfo>) => void;
   closeProject: () => void;
 
   // file system
@@ -138,6 +143,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       openFiles: [],
       activeFileId: null,
       explorerAction: null,
+    }),
+  updateCurrentProjectMeta: (project) =>
+    set((state) => {
+      if (!state.currentProject) return {};
+      return {
+        currentProject: { ...state.currentProject, ...project },
+      };
     }),
   closeProject: () =>
     set({

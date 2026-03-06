@@ -5,6 +5,7 @@ import RightSidebar from "./RightSidebar"
 import EditorArea from "../editor/EditorArea"
 import ActivityBar from "./ActivityBar"
 import NetworkOverlay from "../network/NetworkOverlay"
+import GitOverlay from "../git/GitOverlay"
 
 const MIN_LEFT_WIDTH = 180
 const MAX_LEFT_WIDTH = 500
@@ -74,6 +75,7 @@ const MainLayout = () => {
 
           {/* ✅ OVERLAY that overlaps left sidebar + part of editor */}
           <NetworkOverlay />
+          <GitOverlay />
         </div>
 
         {/* RIGHT SIDEBAR */}

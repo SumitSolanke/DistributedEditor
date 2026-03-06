@@ -15,20 +15,32 @@ function markBackendCheckedThisSession() {
 
 export default function App() {
   const isRegistered = useAuthStore((s) => s.isRegistered);
+  const user = useAuthStore((s) => s.user);
   const register = useAuthStore((s) => s.register);
+  const reset = useAuthStore((s) => s.reset);
   const [isInitialized, setIsInitialized] = useState(false);
+
+  const hasLocalRegistration =
+    isRegistered &&
+    typeof user?.name === "string" &&
+    user.name.trim().length > 0 &&
+    typeof user?.email === "string" &&
+    user.email.trim().length > 0;
 
   useEffect(() => {
     let mounted = true;
 
     const initAuth = async () => {
-      if (isRegistered || hasCheckedBackendThisSession()) {
+      if (hasCheckedBackendThisSession()) {
         if (mounted) setIsInitialized(true);
         return;
       }
 
       const getRegisteredUser = window.api?.getRegisteredUser;
       if (typeof getRegisteredUser !== "function") {
+        if (!hasLocalRegistration) {
+          reset();
+        }
         markBackendCheckedThisSession();
         if (mounted) setIsInitialized(true);
         return;
@@ -38,17 +50,27 @@ export default function App() {
         const result = await getRegisteredUser();
         if (!mounted) return;
 
-        if (result?.success && result.user) {
+        const backendUser = result?.success ? result.user : null;
+        if (
+          backendUser &&
+          typeof backendUser.name === "string" &&
+          backendUser.name.trim() &&
+          typeof backendUser.email === "string" &&
+          backendUser.email.trim()
+        ) {
           register({
-            name: result.user.name || "",
-            ip: result.user.ip || "",
-            email: result.user.email || "",
+            name: backendUser.name,
+            ip: backendUser.ip || "",
+            email: backendUser.email,
           });
         } else {
-          useAuthStore.setState({ user: null, isRegistered: false });
+          reset();
         }
       } catch (error) {
         console.error("Startup backend user sync failed:", error);
+        if (!hasLocalRegistration) {
+          reset();
+        }
       } finally {
         if (!mounted) return;
         markBackendCheckedThisSession();
@@ -61,11 +83,11 @@ export default function App() {
     return () => {
       mounted = false;
     };
-  }, [isRegistered, register]);
+  }, [hasLocalRegistration, register, reset]);
 
   if (!isInitialized) return null;
 
-  if (!isRegistered) return <RegisterPage />;
+  if (!hasLocalRegistration) return <RegisterPage />;
 
   return <MainLayout />;
 }

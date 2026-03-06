@@ -1,10 +1,12 @@
-import { Files, Users, Share2 } from "lucide-react"
+import { Files, Users, Share2, GitBranch } from "lucide-react"
 import { useEditorStore } from "../../store/editorStore"
 import { useNetworkStore } from "../../store/networkStore"
+import { useGitStore } from "../../store/gitStore"
 
 export default function ActivityBar() {
   const { setActiveSidebar, activeSidebar } = useEditorStore()
   const { toggleOverlay } = useNetworkStore()
+  const { toggleOverlay: toggleGitOverlay, overlayOpen: gitOverlayOpen } = useGitStore()
 
   const iconBtn = (active: boolean) =>
     `w-12 h-12 flex items-center justify-center hover:bg-[#2a2d2e] ${
@@ -27,6 +29,14 @@ export default function ActivityBar() {
         onClick={() => setActiveSidebar("connection")}
       >
         <Users size={20} className="text-white" />
+      </button>
+
+      <button
+        className={iconBtn(gitOverlayOpen)}
+        title="Git"
+        onClick={toggleGitOverlay}
+      >
+        <GitBranch size={20} className="text-white" />
       </button>
 
       <button

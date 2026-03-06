@@ -2,10 +2,15 @@ import { useCallback, useMemo, useState } from "react";
 import { FolderOpen, Plus } from "lucide-react";
 import { useEditorStore } from "../../store/editorStore";
 import type { ConnectionItem } from "../../types/electron.types";
+import type { ProjectMetadata } from "../../types/project.types";
 import {
   backendNodesToFileNodes,
   buildProjectTree,
 } from "../../utils/projectTree";
+import {
+  findProjectByIdOrName,
+  normalizeProjects,
+} from "../../utils/projectMetadata";
 import FileTree from "../editor/FileTree";
 import MemberList from "../members/MemberList";
 
@@ -13,10 +18,7 @@ interface LeftSidebarProps {
   isOpen: boolean;
 }
 
-interface ProjectOption {
-  id: string;
-  name: string;
-}
+type ProjectOption = ProjectMetadata;
 
 interface ConnectionOption {
   id: string;
@@ -43,14 +45,24 @@ function toConnectionOptions(items: ConnectionItem[]): ConnectionOption[] {
 }
 
 export default function LeftSidebar({ isOpen }: LeftSidebarProps) {
-  const { activeSidebar, fileTree, currentProject, openProject, setFileTree, closeProject } =
-    useEditorStore();
+  const {
+    activeSidebar,
+    fileTree,
+    currentProject,
+    openProject,
+    setFileTree,
+    closeProject,
+    updateCurrentProjectMeta,
+  } = useEditorStore();
 
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [showOpenProject, setShowOpenProject] = useState(false);
 
   const [projectName, setProjectName] = useState("");
-  const [selectedConnectionIds, setSelectedConnectionIds] = useState<string[]>([]);
+  const [isProjectPublic, setIsProjectPublic] = useState(false);
+  const [selectedConnectionIds, setSelectedConnectionIds] = useState<string[]>(
+    [],
+  );
   const [connections, setConnections] = useState<ConnectionOption[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
 
@@ -64,21 +76,94 @@ export default function LeftSidebar({ isOpen }: LeftSidebarProps) {
     [connections, selectedConnectionIds],
   );
 
-  const reloadProjectTree = useCallback(
-    async (projectToLoad?: string) => {
-      const project = projectToLoad || currentProject?.name;
-      if (!project || !window.api?.loadProject) return;
+  const fetchProjects = useCallback(async (): Promise<ProjectOption[]> => {
+    setLoadingProjects(true);
+    setOpenError("");
+    try {
+      const res = await window.api?.getProjects?.();
+      if (!res?.success) {
+        setProjects([]);
+        return [];
+      }
 
-      const loaded = await window.api.loadProject({ path: "", projectName: project });
+      const parsed = normalizeProjects(res.data);
+      setProjects(parsed);
+      return parsed;
+    } catch {
+      setProjects([]);
+      return [];
+    } finally {
+      setLoadingProjects(false);
+    }
+  }, []);
+
+  const reloadProjectTree = useCallback(
+    async (projectToLoad?: ProjectOption | string) => {
+      let targetProject: ProjectOption | null =
+        typeof projectToLoad === "string" || !projectToLoad
+          ? null
+          : projectToLoad;
+
+      const fallbackName =
+        typeof projectToLoad === "string"
+          ? projectToLoad
+          : targetProject?.name || currentProject?.name;
+
+      if (!targetProject && fallbackName) {
+        const latestProjects = await fetchProjects();
+        targetProject = findProjectByIdOrName(latestProjects, {
+          id: currentProject?.id,
+          name: fallbackName,
+        });
+      }
+
+      if (!targetProject && fallbackName) {
+        targetProject = {
+          id: fallbackName,
+          name: fallbackName,
+          public: false,
+          owner: {},
+          branches: {},
+        };
+      }
+
+      if (!targetProject || !window.api?.loadProject) return;
+
+      const loaded = await window.api.loadProject({
+        path: "",
+        projectName: targetProject.name,
+      });
       const children = Array.isArray(loaded) ? backendNodesToFileNodes(loaded) : [];
-      const nextTree = buildProjectTree(project, children);
-      if (!currentProject || currentProject.name !== project) {
-        openProject({ id: project, name: project, connections: [] }, nextTree);
+      const nextTree = buildProjectTree(targetProject.name, children);
+
+      const metaPatch = {
+        public: targetProject.public,
+        ownerEmail: targetProject.owner.email || "",
+        branches: targetProject.branches,
+      };
+
+      if (!currentProject || currentProject.name !== targetProject.name) {
+        openProject(
+          {
+            id: targetProject.id,
+            name: targetProject.name,
+            connections: [],
+            ...metaPatch,
+          },
+          nextTree,
+        );
       } else {
         setFileTree(nextTree);
+        updateCurrentProjectMeta({ id: targetProject.id, ...metaPatch });
       }
     },
-    [currentProject, openProject, setFileTree],
+    [
+      currentProject,
+      fetchProjects,
+      openProject,
+      setFileTree,
+      updateCurrentProjectMeta,
+    ],
   );
 
   const fetchConnections = useCallback(async () => {
@@ -97,42 +182,13 @@ export default function LeftSidebar({ isOpen }: LeftSidebarProps) {
     }
   }, []);
 
-  const fetchProjects = useCallback(async () => {
-    setLoadingProjects(true);
-    setOpenError("");
-    try {
-      const res = await window.api?.getProjects?.();
-      if (!res?.success) {
-        setProjects([]);
-        return;
-      }
-
-      const raw = res.data;
-      if (Array.isArray(raw)) {
-        const parsed = raw
-          .map((item) => {
-            if (typeof item === "string") return { id: item, name: item };
-            if (item && typeof item === "object" && "name" in item) {
-              return { id: String(item.id || item.name), name: String(item.name) };
-            }
-            return null;
-          })
-          .filter(Boolean) as ProjectOption[];
-        setProjects(parsed);
-      } else {
-        setProjects([]);
-      }
-    } catch {
-      setProjects([]);
-    } finally {
-      setLoadingProjects(false);
-    }
-  }, []);
-
   const onOpenCreateProject = useCallback(async () => {
     setShowOpenProject(false);
     setShowCreateProject(true);
     setCreateError("");
+    setProjectName("");
+    setIsProjectPublic(false);
+    setSelectedConnectionIds([]);
     await fetchConnections();
   }, [fetchConnections]);
 
@@ -160,29 +216,42 @@ export default function LeftSidebar({ isOpen }: LeftSidebarProps) {
         ip: c.ip,
         email: c.email,
       }));
+
       const addRes = await window.api.addProject({
         projectName: trimmed,
         connections: connectionsPayload,
+        isPublic: isProjectPublic,
       });
       if (!addRes?.success) {
         setCreateError(addRes?.message || "Unable to create project.");
         return;
       }
 
-      await reloadProjectTree(trimmed);
+      const latestProjects = await fetchProjects();
+      const createdProject = findProjectByIdOrName(latestProjects, {
+        name: trimmed,
+      });
+      await reloadProjectTree(createdProject || trimmed);
       setShowCreateProject(false);
       setProjectName("");
+      setIsProjectPublic(false);
       setSelectedConnectionIds([]);
     } catch {
       setCreateError("Unable to create project.");
     }
-  }, [projectName, reloadProjectTree, selectedConnections]);
+  }, [
+    fetchProjects,
+    isProjectPublic,
+    projectName,
+    reloadProjectTree,
+    selectedConnections,
+  ]);
 
   const onChooseProject = useCallback(
     async (project: ProjectOption) => {
       try {
         setOpenError("");
-        await reloadProjectTree(project.name);
+        await reloadProjectTree(project);
         setShowOpenProject(false);
       } catch {
         setOpenError("Unable to open selected project.");
@@ -200,7 +269,10 @@ export default function LeftSidebar({ isOpen }: LeftSidebarProps) {
     if (!confirmed) return;
 
     try {
-      const res = await window.api.deleteProject({ projectName: currentProject.name });
+      const res = await window.api.deleteProject({
+        projectName: currentProject.name,
+        id: currentProject.id,
+      });
       if (!res?.success) {
         alert(res?.message || "Unable to delete project.");
         return;
@@ -213,7 +285,7 @@ export default function LeftSidebar({ isOpen }: LeftSidebarProps) {
     } catch {
       alert("Unable to delete project.");
     }
-  }, [closeProject, currentProject?.name]);
+  }, [closeProject, currentProject]);
 
   const toggleConnection = useCallback((id: string) => {
     setSelectedConnectionIds((prev) =>
@@ -267,6 +339,18 @@ export default function LeftSidebar({ isOpen }: LeftSidebarProps) {
                     className="w-full bg-[#1a1a1a] border border-gray-600 rounded px-2 py-2 text-sm outline-none focus:border-[#007acc]"
                   />
                 </div>
+
+                <label className="flex items-start gap-2 text-xs text-gray-300 bg-[#252526] border border-gray-700 rounded px-2 py-2">
+                  <input
+                    type="checkbox"
+                    checked={isProjectPublic}
+                    onChange={(e) => setIsProjectPublic(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    Make project public (this cannot be reverted to private later).
+                  </span>
+                </label>
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -355,7 +439,18 @@ export default function LeftSidebar({ isOpen }: LeftSidebarProps) {
                         className="w-full text-left bg-[#252526] border border-gray-700 rounded px-3 py-2 hover:bg-[#2e2e2e]"
                         onClick={() => void onChooseProject(project)}
                       >
-                        <div className="text-sm">{project.name}</div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-sm">{project.name}</div>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded border ${
+                              project.public
+                                ? "border-emerald-500/70 text-emerald-300"
+                                : "border-gray-600 text-gray-300"
+                            }`}
+                          >
+                            {project.public ? "Public" : "Private"}
+                          </span>
+                        </div>
                       </button>
                     ))
                   )}
@@ -376,7 +471,18 @@ export default function LeftSidebar({ isOpen }: LeftSidebarProps) {
 
             {currentProject ? (
               <>
-                <div className="text-xs text-gray-400 px-1">Project: {currentProject.name}</div>
+                <div className="text-xs text-gray-400 px-1 flex items-center justify-between">
+                  <span>Project: {currentProject.name}</span>
+                  <span
+                    className={`px-2 py-0.5 rounded border text-[10px] ${
+                      currentProject.public
+                        ? "border-emerald-500/70 text-emerald-300"
+                        : "border-gray-600 text-gray-300"
+                    }`}
+                  >
+                    {currentProject.public ? "Public" : "Private"}
+                  </span>
+                </div>
                 <div className="min-h-0 overflow-auto">
                   <FileTree
                     nodes={fileTree}
