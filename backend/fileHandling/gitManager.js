@@ -2,6 +2,24 @@ import git from "isomorphic-git";
 import fs from "fs-extra";
 import path from "path";
 
+const DEFAULT_AUTHOR = {
+  name: "system",
+  email: "system@local",
+};
+
+function normalizeAuthor(author) {
+  if (!author || typeof author !== "object") return DEFAULT_AUTHOR;
+  const name =
+    typeof author.name === "string" && author.name.trim()
+      ? author.name.trim()
+      : DEFAULT_AUTHOR.name;
+  const email =
+    typeof author.email === "string" && author.email.trim()
+      ? author.email.trim()
+      : DEFAULT_AUTHOR.email;
+  return { name, email };
+}
+
 export async function initRepo(projectPath) {
   await git.init({
     fs,
@@ -58,85 +76,431 @@ export async function commitChanges(projectPath, message, author) {
     fs,
     dir: projectPath,
     message,
-    author: {
-      name: author.name,
-      email: author.email,
-    },
+    author: normalizeAuthor(author),
   });
 }
 
-export async function revertLastCommit(projectPath) {
-  const log = await git.log({
-    fs,
-    dir: projectPath,
-    depth: 1,
-  });
-
-  if (!log.length) throw new Error("No commits to revert");
-
-  await git.revert({
-    fs,
-    dir: projectPath,
-    oid: log[0].oid,
-  });
+function buffersEqual(left, right) {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
 }
 
-export async function revertCommit(projectPath, branchName, commitOid) {
-  // 1️⃣ Ensure branch is checked out
-  const currentBranch = await git.currentBranch({
-    fs,
-    dir: projectPath,
-    fullname: false,
-  });
+async function ensureRevertContext(projectPath, branchName) {
+  const currentBranch = await getCurrentBranch(projectPath);
+  if (!currentBranch) {
+    throw new Error("Cannot revert in detached HEAD");
+  }
+  if (branchName && currentBranch !== branchName) {
+    throw new Error(`Branch "${branchName}" must be checked out first`);
+  }
 
-  if (currentBranch !== branchName) {
+  const dirty = await hasUncommittedChanges(projectPath);
+  if (dirty) {
     throw new Error(
-      `Branch "${branchName}" must be checked out before reverting`,
+      "Uncommitted changes detected. Commit or discard before reverting.",
     );
   }
 
-  // 2️⃣ Ensure commit exists in this branch history
-  const history = await git.log({
+  return currentBranch;
+}
+
+async function getChangedPathsBetweenRefs(projectPath, fromRef, toRef) {
+  const fromFiles = await git.listFiles({
     fs,
     dir: projectPath,
-    ref: branchName,
+    ref: fromRef,
+  });
+  const toFiles = await git.listFiles({
+    fs,
+    dir: projectPath,
+    ref: toRef,
   });
 
-  const commitExists = history.some((entry) => entry.oid === commitOid);
+  const fromSet = new Set(fromFiles);
+  const toSet = new Set(toFiles);
+  const allPaths = new Set([...fromFiles, ...toFiles]);
+  const changed = [];
 
-  if (!commitExists) {
-    throw new Error("Commit does not belong to this branch");
+  for (const filepath of allPaths) {
+    const inFrom = fromSet.has(filepath);
+    const inTo = toSet.has(filepath);
+
+    if (!inFrom || !inTo) {
+      changed.push(filepath);
+      continue;
+    }
+
+    const [fromBlobRes, toBlobRes] = await Promise.all([
+      git.readBlob({
+        fs,
+        dir: projectPath,
+        oid: fromRef,
+        filepath,
+      }),
+      git.readBlob({
+        fs,
+        dir: projectPath,
+        oid: toRef,
+        filepath,
+      }),
+    ]);
+
+    const fromBlob = Buffer.from(fromBlobRes.blob);
+    const toBlob = Buffer.from(toBlobRes.blob);
+    if (!buffersEqual(fromBlob, toBlob)) {
+      changed.push(filepath);
+    }
   }
 
-  // 3️⃣ Revert commit
-  await git.revert({
+  return { changed, fromSet };
+}
+
+async function applyRefSnapshotForPaths(
+  projectPath,
+  sourceRef,
+  sourceSet,
+  paths,
+) {
+  for (const filepath of paths) {
+    const absolutePath = path.join(projectPath, filepath);
+
+    if (sourceSet.has(filepath)) {
+      const { blob } = await git.readBlob({
+        fs,
+        dir: projectPath,
+        oid: sourceRef,
+        filepath,
+      });
+      await fs.outputFile(absolutePath, Buffer.from(blob));
+      await git.add({
+        fs,
+        dir: projectPath,
+        filepath,
+      });
+      continue;
+    }
+
+    await fs.remove(absolutePath);
+    try {
+      await git.remove({
+        fs,
+        dir: projectPath,
+        filepath,
+      });
+    } catch {
+      // Path may already be absent from index/worktree in current HEAD.
+    }
+  }
+}
+
+async function createRevertCommit(projectPath, commitOid, author) {
+  const source = await git.readCommit({
     fs,
     dir: projectPath,
     oid: commitOid,
   });
+  const subject = source.commit.message.split("\n")[0] || commitOid.slice(0, 8);
+  const message = `Revert "${subject}"\n\nThis reverts commit ${commitOid}.`;
 
-  return true;
-}
-
-export async function mergeBranch(projectPath, ours, theirs) {
-  const result = await git.merge({
+  return await git.commit({
     fs,
     dir: projectPath,
-    ours,
-    theirs,
-    fastForwardOnly: false,
+    message,
+    author: normalizeAuthor(author),
   });
-
-  return result;
 }
 
-export async function rebaseBranch(projectPath, branch, onto) {
-  await git.rebase({
+async function revertCommitInternal(projectPath, commitOid, author) {
+  const { commit } = await git.readCommit({
+    fs,
+    dir: projectPath,
+    oid: commitOid,
+  });
+  const parentOid = commit.parent?.[0];
+  if (!parentOid) {
+    throw new Error("Cannot revert the initial commit");
+  }
+
+  const { changed, fromSet } = await getChangedPathsBetweenRefs(
+    projectPath,
+    parentOid,
+    commitOid,
+  );
+
+  if (!changed.length) {
+    throw new Error("Nothing to revert");
+  }
+
+  await applyRefSnapshotForPaths(projectPath, parentOid, fromSet, changed);
+
+  const dirty = await hasUncommittedChanges(projectPath);
+  if (!dirty) {
+    throw new Error("Nothing to revert");
+  }
+
+  return await createRevertCommit(projectPath, commitOid, author);
+}
+
+export async function revertLastCommit(projectPath, branchName, author) {
+  const currentBranch = await ensureRevertContext(projectPath, branchName);
+  const log = await git.log({
+    fs,
+    dir: projectPath,
+    depth: 1,
+    ref: currentBranch,
+  });
+  if (!log.length) {
+    throw new Error("No commits to revert");
+  }
+
+  return await revertCommitInternal(projectPath, log[0].oid, author);
+}
+
+export async function revertCommit(projectPath, branchName, commitOid, author) {
+  const currentBranch = await ensureRevertContext(projectPath, branchName);
+  const history = await git.log({
+    fs,
+    dir: projectPath,
+    ref: currentBranch,
+  });
+  const commitExists = history.some((entry) => entry.oid === commitOid);
+  if (!commitExists) {
+    throw new Error("Commit does not belong to this branch");
+  }
+
+  return await revertCommitInternal(projectPath, commitOid, author);
+}
+
+export async function mergeBranch(projectPath, ours, theirs, author) {
+  const currentBranch = await getCurrentBranch(projectPath);
+  if (!currentBranch) {
+    throw new Error("Cannot merge while in detached HEAD");
+  }
+  if (currentBranch !== ours) {
+    throw new Error(`Branch "${ours}" must be checked out before merging`);
+  }
+
+  const dirty = await hasUncommittedChanges(projectPath);
+  if (dirty) {
+    throw new Error(
+      "Uncommitted changes detected. Commit or discard before merging.",
+    );
+  }
+
+  try {
+    const result = await git.merge({
+      fs,
+      dir: projectPath,
+      ours,
+      theirs,
+      fastForwardOnly: false,
+      abortOnConflict: true,
+      author: normalizeAuthor(author),
+    });
+
+    // Ensure working tree and index are aligned with the merged HEAD.
+    await discardAllUncommittedChanges(projectPath);
+    return result;
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error.code === "MergeConflictError" ||
+        error.code === "MergeNotSupportedError")
+    ) {
+      const conflicts =
+        "data" in error && Array.isArray(error.data) && error.data.length
+          ? ` Conflicts: ${error.data.join(", ")}.`
+          : "";
+      throw new Error(
+        `Merge conflict while merging "${theirs}" into "${ours}".${conflicts}`,
+      );
+    }
+
+    throw error;
+  }
+}
+
+export async function rebaseBranch(projectPath, branch, onto, author) {
+  const currentBranch = await getCurrentBranch(projectPath);
+  if (!currentBranch) {
+    throw new Error("Cannot rebase while in detached HEAD");
+  }
+  if (currentBranch !== branch) {
+    throw new Error(`Branch "${branch}" must be checked out before rebasing`);
+  }
+  if (branch === onto) {
+    throw new Error("Cannot rebase a branch onto itself");
+  }
+
+  const dirty = await hasUncommittedChanges(projectPath);
+  if (dirty) {
+    throw new Error(
+      "Uncommitted changes detected. Commit or discard before rebasing.",
+    );
+  }
+
+  const [branchOid, ontoOid] = await Promise.all([
+    git.resolveRef({
+      fs,
+      dir: projectPath,
+      ref: branch,
+    }),
+    git.resolveRef({
+      fs,
+      dir: projectPath,
+      ref: onto,
+    }),
+  ]);
+
+  const mergeBases = await git.findMergeBase({
+    fs,
+    dir: projectPath,
+    oids: [branchOid, ontoOid],
+  });
+  if (!mergeBases.length) {
+    throw new Error("Unable to find a merge base for rebase.");
+  }
+
+  const baseOid = mergeBases[0];
+  const branchHistory = await git.log({
     fs,
     dir: projectPath,
     ref: branch,
-    onto,
   });
+
+  const commitsToReplay = [];
+  for (const entry of branchHistory) {
+    if (entry.oid === baseOid) break;
+    commitsToReplay.push(entry);
+  }
+
+  // No branch-only commits: move branch tip directly to onto.
+  if (!commitsToReplay.length) {
+    await git.writeRef({
+      fs,
+      dir: projectPath,
+      ref: `refs/heads/${branch}`,
+      value: ontoOid,
+      force: true,
+    });
+    await git.checkout({
+      fs,
+      dir: projectPath,
+      ref: branch,
+      force: true,
+    });
+    return { replayed: 0, movedTo: ontoOid };
+  }
+
+  const commitsOldestFirst = commitsToReplay.reverse();
+  for (const entry of commitsOldestFirst) {
+    if ((entry.commit.parent || []).length > 1) {
+      throw new Error(
+        "Rebase of merge commits is not supported in this application.",
+      );
+    }
+  }
+
+  const tempBranch = `__rebase_tmp_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+
+  try {
+    await git.branch({
+      fs,
+      dir: projectPath,
+      ref: tempBranch,
+      object: ontoOid,
+    });
+    await git.checkout({
+      fs,
+      dir: projectPath,
+      ref: tempBranch,
+      force: true,
+    });
+
+    for (const entry of commitsOldestFirst) {
+      try {
+        await git.cherryPick({
+          fs,
+          dir: projectPath,
+          oid: entry.oid,
+          abortOnConflict: true,
+          committer: normalizeAuthor(author),
+        });
+      } catch (error) {
+        if (
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          (error.code === "MergeConflictError" ||
+            error.code === "MergeNotSupportedError")
+        ) {
+          const conflicts =
+            "data" in error && Array.isArray(error.data) && error.data.length
+              ? ` Conflicts: ${error.data.join(", ")}.`
+              : "";
+          throw new Error(
+            `Rebase conflict while replaying commit ${entry.oid.slice(0, 8)}.${conflicts}`,
+          );
+        }
+        throw error;
+      }
+    }
+
+    const rebasedTip = await git.resolveRef({
+      fs,
+      dir: projectPath,
+      ref: tempBranch,
+    });
+
+    await git.writeRef({
+      fs,
+      dir: projectPath,
+      ref: `refs/heads/${branch}`,
+      value: rebasedTip,
+      force: true,
+    });
+
+    await git.checkout({
+      fs,
+      dir: projectPath,
+      ref: branch,
+      force: true,
+    });
+
+    await git.deleteBranch({
+      fs,
+      dir: projectPath,
+      ref: tempBranch,
+    });
+
+    return { replayed: commitsOldestFirst.length, movedTo: rebasedTip };
+  } catch (error) {
+    try {
+      await git.checkout({
+        fs,
+        dir: projectPath,
+        ref: branch,
+        force: true,
+      });
+    } catch {
+      // best-effort cleanup
+    }
+    try {
+      await git.deleteBranch({
+        fs,
+        dir: projectPath,
+        ref: tempBranch,
+      });
+    } catch {
+      // best-effort cleanup
+    }
+    throw error;
+  }
 }
 
 export async function getAllBranches(projectPath) {
@@ -147,21 +511,15 @@ export async function getAllBranches(projectPath) {
 }
 
 export async function getRepoMap(projectPath) {
-  const branches = await git.listBranches({
-    fs,
-    dir: projectPath,
-  });
-
+  const branches = await getAllBranches(projectPath);
   const map = {};
 
   for (const branch of branches) {
-    const oid = await git.resolveRef({
+    map[branch] = await git.resolveRef({
       fs,
       dir: projectPath,
       ref: branch,
     });
-
-    map[branch] = oid;
   }
 
   return map;
@@ -190,31 +548,9 @@ export async function hasUncommittedChanges(projectPath) {
     dir: projectPath,
   });
 
-  return matrix.some(([filepath, head, workdir, stage]) => {
+  return matrix.some(([, head, workdir, stage]) => {
     return head !== workdir || workdir !== stage;
   });
-}
-
-export async function safeCheckoutBranch(projectPath, branchName) {
-  const dirty = await hasUncommittedChanges(projectPath);
-
-  if (dirty) {
-    const files = await getChangedFiles(projectPath);
-
-    throw {
-      type: "DIRTY_WORKING_DIRECTORY",
-      message: "Uncommitted changes detected. Commit before switching branch.",
-      files,
-    };
-  }
-
-  await git.checkout({
-    fs,
-    dir: projectPath,
-    ref: branchName,
-  });
-
-  return true;
 }
 
 export async function getChangedFiles(projectPath) {
@@ -224,26 +560,38 @@ export async function getChangedFiles(projectPath) {
   });
 
   const changed = [];
-
   for (const [filepath, head, workdir, stage] of matrix) {
     if (head !== workdir || workdir !== stage) {
       changed.push(filepath);
     }
   }
-
   return changed;
+}
+
+export async function safeCheckoutBranch(projectPath, branchName) {
+  const dirty = await hasUncommittedChanges(projectPath);
+  if (dirty) {
+    throw {
+      type: "DIRTY_WORKING_DIRECTORY",
+      message: "Uncommitted changes detected. Commit before switching branch.",
+      files: await getChangedFiles(projectPath),
+    };
+  }
+
+  await git.checkout({
+    fs,
+    dir: projectPath,
+    ref: branchName,
+  });
 }
 
 export async function safeCheckoutCommit(projectPath, commitOid) {
   const dirty = await hasUncommittedChanges(projectPath);
-
   if (dirty) {
-    const files = await getChangedFiles(projectPath);
-
     throw {
       type: "DIRTY_WORKING_DIRECTORY",
       message: "Uncommitted changes detected. Commit before viewing commit.",
-      files,
+      files: await getChangedFiles(projectPath),
     };
   }
 
@@ -252,63 +600,46 @@ export async function safeCheckoutCommit(projectPath, commitOid) {
     dir: projectPath,
     ref: commitOid,
   });
-
-  return true;
 }
 
-import * as git from "isomorphic-git";
-import fs from "fs";
-import path from "path";
-
 export async function renameBranch(projectPath, oldName, newName) {
-  const dir = projectPath;
-
-  // Get current commit of old branch
   const oid = await git.resolveRef({
     fs,
-    dir,
+    dir: projectPath,
     ref: `refs/heads/${oldName}`,
   });
 
-  // Create new branch pointing to same commit
   await git.writeRef({
     fs,
-    dir,
+    dir: projectPath,
     ref: `refs/heads/${newName}`,
     value: oid,
   });
 
-  // Delete old branch
   await git.deleteRef({
     fs,
-    dir,
+    dir: projectPath,
     ref: `refs/heads/${oldName}`,
   });
 }
 
-export async function initializeGitForNewProject(projectPath, userEmail) {
+export async function initializeGitForNewProject(projectPath, author) {
   try {
-    // 1️⃣ Init repository
-    await initRepository(projectPath);
+    const normalizedAuthor = normalizeAuthor(author);
+    const userEmail = normalizedAuthor.email;
 
-    // 2️⃣ Create initial commit
-    await commitChanges(projectPath, "Initial commit");
+    await initRepo(projectPath);
+    await commitChanges(projectPath, "Initial commit", normalizedAuthor);
 
-    // 3️⃣ Rename default branch to global-main
     const current = await getCurrentBranch(projectPath);
-
-    if (current !== "global-main") {
+    if (current && current !== "global-main") {
       await renameBranch(projectPath, current, "global-main");
     }
 
-    // 4️⃣ Create user local-main branch
     const userLocalMain = `${userEmail}/local-main`;
     await createBranch(projectPath, userLocalMain);
-
-    // 5️⃣ Checkout user local-main
     await safeCheckoutBranch(projectPath, userLocalMain);
 
-    // 6️⃣ Safety check
     const finalBranch = await getCurrentBranch(projectPath);
     if (finalBranch !== userLocalMain) {
       throw new Error("Failed to switch to user local-main branch");
@@ -322,7 +653,6 @@ export async function initializeGitForNewProject(projectPath, userEmail) {
 }
 
 export function analyzeBranch(branchName, currentUserEmail) {
-  // 1️⃣ Detached HEAD
   if (!branchName) {
     return {
       type: "detached",
@@ -331,7 +661,6 @@ export function analyzeBranch(branchName, currentUserEmail) {
     };
   }
 
-  // 2️⃣ Protected global branch
   if (branchName === "global-main") {
     return {
       type: "global",
@@ -340,9 +669,7 @@ export function analyzeBranch(branchName, currentUserEmail) {
     };
   }
 
-  // 3️⃣ User branch (email/local-main format)
   const parts = branchName.split("/");
-
   if (parts.length < 2) {
     return {
       type: "unknown",
@@ -352,7 +679,6 @@ export function analyzeBranch(branchName, currentUserEmail) {
   }
 
   const ownerEmail = parts[0];
-
   return {
     type: "user",
     owner: ownerEmail,
@@ -361,30 +687,48 @@ export function analyzeBranch(branchName, currentUserEmail) {
 }
 
 export async function discardAllUncommittedChanges(projectPath) {
-  // 1️⃣ Reset branch to HEAD (clears staging + restores tracked files)
-  await git.reset({
+  const current = await getCurrentBranch(projectPath);
+  if (!current) {
+    throw new Error("Cannot discard changes in detached HEAD");
+  }
+
+  await git.checkout({
     fs,
     dir: projectPath,
-    ref: "HEAD",
-    hard: true,
+    ref: current,
+    force: true,
   });
 
-  // 2️⃣ Remove untracked files & directories
   const statusMatrix = await git.statusMatrix({
     fs,
     dir: projectPath,
   });
 
-  for (const row of statusMatrix) {
-    const [filepath, headStatus, workdirStatus] = row;
+  const dirtyPaths = statusMatrix
+    .filter(([, head, workdir, stage]) => head !== workdir || workdir !== stage)
+    .map(([filepath]) => filepath);
 
-    // File not in HEAD but exists in working dir
-    if (headStatus === 0 && workdirStatus === 2) {
-      await fs.rm(path.join(projectPath, filepath), {
-        recursive: true,
-        force: true,
-      });
-    }
+  if (!dirtyPaths.length) return;
+
+  const headFiles = await git.listFiles({
+    fs,
+    dir: projectPath,
+    ref: "HEAD",
+  });
+
+  await applyRefSnapshotForPaths(
+    projectPath,
+    "HEAD",
+    new Set(headFiles),
+    dirtyPaths,
+  );
+
+  const stillDirty = await hasUncommittedChanges(projectPath);
+  if (stillDirty) {
+    const files = await getChangedFiles(projectPath);
+    throw new Error(
+      `Unable to clean working tree after sync. Dirty files: ${files.join(", ")}`,
+    );
   }
 }
 
@@ -405,41 +749,37 @@ export async function getBranchCommitHistory(projectPath, branchName) {
   }));
 }
 
-export async function revertUntilCommit(projectPath, branchName, targetCommit) {
-  // 1️⃣ Get full branch history
+export async function revertUntilCommit(
+  projectPath,
+  branchName,
+  targetCommit,
+  author,
+) {
+  const currentBranch = await ensureRevertContext(projectPath, branchName);
   const history = await git.log({
     fs,
     dir: projectPath,
-    ref: branchName,
+    ref: currentBranch,
   });
 
   if (!history.length) {
     throw new Error("No commits found on branch");
   }
 
-  // 2️⃣ Ensure target commit exists in branch
   const targetIndex = history.findIndex((entry) => entry.oid === targetCommit);
-
   if (targetIndex === -1) {
     throw new Error("Target commit not found in this branch");
   }
+  if (targetIndex === 0) {
+    throw new Error("Selected commit is already the current HEAD");
+  }
 
-  // 3️⃣ Collect commits to revert (newest → until just before target)
   const commitsToRevert = history.slice(0, targetIndex);
-
-  if (!commitsToRevert.length) {
-    throw new Error("Nothing to revert");
-  }
-
-  // 4️⃣ Revert each commit one by one
+  let revertedCount = 0;
   for (const entry of commitsToRevert) {
-    await git.revert({
-      fs,
-      dir: projectPath,
-      oid: entry.oid,
-      noCommit: false,
-    });
+    await revertCommitInternal(projectPath, entry.oid, author);
+    revertedCount += 1;
   }
 
-  return true;
+  return revertedCount;
 }

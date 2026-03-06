@@ -20,11 +20,14 @@ function getProjectRoot() {
 }
 
 export function setCurrentProject(projectName) {
-  const safeProjectName = typeof (projectName === "string"
-    ? projectName.trim()
-    : "");
+  const safeProjectName =
+    typeof projectName === "string" ? projectName.trim() : "";
   const projects = store.get("projects", {});
-  if (!safeProjectName || !projects[safeProjectName]) {
+  const exists = Array.isArray(projects)
+    ? projects.some((project) => project?.name === safeProjectName)
+    : Boolean(projects[safeProjectName]);
+
+  if (!safeProjectName || !exists) {
     throw new Error("Project not found");
   }
   store.set("currentProject", safeProjectName);
@@ -121,9 +124,12 @@ export async function buildTree(relativePath = "") {
   const dirPath = resolveSafePath(relativePath);
 
   const items = await fs.readdir(dirPath, { withFileTypes: true });
+  const visibleItems = items.filter(
+    (item) => item.name.toLowerCase() !== ".git",
+  );
 
   const children = await Promise.all(
-    items.map(async (item) => {
+    visibleItems.map(async (item) => {
       const itemRelativePath = path.join(relativePath, item.name);
 
       if (item.isDirectory()) {
@@ -164,8 +170,11 @@ export async function addProjectFolder(projectName) {
   const projectPath = path.join(projectsRoot, safeProjectName);
   try {
     await fs.mkdir(projectPath, { recursive: false });
-    const userEmail = getSelf().email || "";
-    await initializeGitForNewProject(projectPath, userEmail);
+    const self = getSelf() || {};
+    await initializeGitForNewProject(projectPath, {
+      name: self.name || "system",
+      email: self.email || "",
+    });
   } catch (error) {
     if (
       error &&
@@ -183,8 +192,11 @@ export async function addProjectFolder(projectName) {
 
 export async function deleteProjectFolder(projectName) {
   const projects = store.get("projects", {});
+  const projectExists = Array.isArray(projects)
+    ? projects.some((project) => project?.name === projectName)
+    : Boolean(projects[projectName]);
 
-  if (!projects[projectName]) {
+  if (!projectExists) {
     throw new Error("Project not found");
   }
 
@@ -193,8 +205,15 @@ export async function deleteProjectFolder(projectName) {
   await fs.rm(projectPath, { recursive: true, force: true });
 
   // 2️⃣ Remove from store
-  delete projects[projectName];
-  store.set("projects", projects);
+  if (Array.isArray(projects)) {
+    store.set(
+      "projects",
+      projects.filter((project) => project?.name !== projectName),
+    );
+  } else {
+    delete projects[projectName];
+    store.set("projects", projects);
+  }
   store.set("currentProject", null);
   return true;
 }

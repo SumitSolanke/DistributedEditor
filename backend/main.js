@@ -4,6 +4,7 @@ import files from "./fileHandling/fileOperations.js";
 import { broadcastToAll } from "./network/websockets.js";
 import { user as userStore, devices } from "./storage/store.js";
 import { registerProjectHandlers } from "./fileHandling/project.js";
+import { registerGitHandlers } from "./fileHandling/gitHandlers.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +30,7 @@ app.whenReady().then(() => {
   connections.registerHandlers();
   files.fileHandlers();
   registerProjectHandlers();
+  registerGitHandlers();
   createWindow();
   try {
     broadcastToAll();

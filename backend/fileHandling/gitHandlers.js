@@ -31,6 +31,8 @@ import { getSelf } from "../storage/store.js";
 import path from "path";
 import { app } from "electron";
 import git from "isomorphic-git";
+import fs from "fs";
+import { ipcMain } from "electron/main";
 
 export function registerGitHandlers() {
   const userDataPath = app.getPath("userData");
@@ -55,6 +57,20 @@ export function registerGitHandlers() {
     try {
       const branch = await getCurrentBranch(getProjectPath(projectName));
       return { success: true, data: branch };
+    } catch (error) {
+      return { success: false, message: error.message };
+    }
+  });
+
+  ipcMain.handle("git-head-commit", async (event, { projectName }) => {
+    try {
+      const commits = await git.log({
+        fs,
+        dir: getProjectPath(projectName),
+        ref: "HEAD",
+        depth: 1,
+      });
+      return { success: true, data: commits[0]?.oid || "" };
     } catch (error) {
       return { success: false, message: error.message };
     }
@@ -301,11 +317,22 @@ export function registerGitHandlers() {
           getProjectPath(projectName),
           ours,
           theirs,
+          self,
         );
 
-        return { success: true, result };
+        const message = result?.alreadyMerged
+          ? "Already up to date."
+          : result?.fastForward
+            ? `Fast-forward merged ${theirs} into ${ours}.`
+            : `Merged ${theirs} into ${ours}.`;
+
+        return { success: true, result, message };
       } catch (error) {
-        return { success: false, message: error.message };
+        const code =
+          error && typeof error === "object" && "code" in error
+            ? error.code
+            : "MERGE_FAILED";
+        return { success: false, code, message: error.message };
       }
     },
   );
@@ -339,15 +366,7 @@ export function registerGitHandlers() {
           }
         }
 
-        // 🔥 RECOMMENDED RULE — Prevent rebasing public branches
-        if (
-          targetBranch.visibility === "public" &&
-          targetBranch.owner !== requesterEmail
-        ) {
-          throw new Error("Public branches cannot be rebased by others");
-        }
-
-        await rebaseBranch(getProjectPath(projectName), branch, onto);
+        await rebaseBranch(getProjectPath(projectName), branch, onto, self);
 
         return { success: true };
       } catch (error) {
@@ -382,7 +401,7 @@ export function registerGitHandlers() {
           }
         }
 
-        await revertLastCommit(getProjectPath(projectName), branchName);
+        await revertLastCommit(getProjectPath(projectName), branchName, self);
 
         return { success: true };
       } catch (error) {
@@ -420,6 +439,7 @@ export function registerGitHandlers() {
           getProjectPath(projectName),
           branchName,
           targetCommit,
+          self,
         );
 
         return { success: true };
@@ -467,7 +487,7 @@ export function registerGitHandlers() {
           throw new Error("Commit does not belong to this branch");
         }
 
-        await revertCommit(getProjectPath(projectName), branchName, commitOid);
+        await revertCommit(getProjectPath(projectName), branchName, commitOid, self);
 
         return { success: true };
       } catch (error) {

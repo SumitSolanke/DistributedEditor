@@ -11,18 +11,23 @@ import { addProjectFolder, deleteProjectFolder } from "./fileOperations.js";
 export function registerProjectHandlers() {
   ipcMain.handle("add-project", async (event, data) => {
     let projectAdded = false;
+    let createdProjectId = null;
     const projectName = data?.projectName;
     try {
       const { connections, isPublic } = data;
 
-      addProject(projectName, connections || [], isPublic || false);
+      createdProjectId = addProject(
+        projectName,
+        connections || [],
+        isPublic || false,
+      );
       projectAdded = true;
       await addProjectFolder(projectName);
       return { success: true };
     } catch (error) {
-      if (projectAdded) {
+      if (projectAdded && createdProjectId) {
         try {
-          deleteProject(projectName);
+          deleteProject(createdProjectId);
         } catch {
           // best effort rollback
         }

@@ -13,19 +13,51 @@ const store = new Store({
 
 export default store;
 
+function getProjectsArray() {
+  const projects = store.get("projects");
+
+  if (Array.isArray(projects)) {
+    return projects;
+  }
+
+  if (projects && typeof projects === "object") {
+    const migrated = Object.values(projects).filter(
+      (entry) => entry && typeof entry === "object",
+    );
+    store.set("projects", migrated);
+    return migrated;
+  }
+
+  return [];
+}
+
+function getSelfOrThrow() {
+  const self = getSelf();
+  if (!self || typeof self.email !== "string" || !self.email.trim()) {
+    throw new Error(
+      "User profile is missing. Please register again before creating a project.",
+    );
+  }
+
+  return {
+    ...self,
+    email: self.email.trim(),
+  };
+}
+
 export function addProject(projectName, connections = [], isPublic = false) {
   if (typeof projectName !== "string" || !projectName.trim()) {
     throw new Error("Project name is required");
   }
 
   const safeProjectName = projectName.trim();
-  const projects = store.get("projects");
+  const projects = getProjectsArray();
 
   if (projects.find((p) => p.name === safeProjectName)) {
     throw new Error("Project already exists");
   }
 
-  const self = getSelf(); // { username, email, ip }
+  const self = getSelfOrThrow(); // { name, email, ip }
   const projectId = uuidv4();
 
   const allMembers = [
@@ -62,22 +94,22 @@ export function addProject(projectName, connections = [], isPublic = false) {
 }
 
 export function getProjects() {
-  return store.get("projects");
+  return getProjectsArray();
 }
 
 export function getProjectById(projectId) {
-  const projects = store.get("projects");
+  const projects = getProjectsArray();
   return projects.find((p) => p.id === projectId);
 }
 
 export function deleteProject(projectId) {
-  let projects = store.get("projects");
+  let projects = getProjectsArray();
   projects = projects.filter((p) => p.id !== projectId);
   store.set("projects", projects);
 }
 
 export function setProjectPublic(projectId) {
-  const projects = store.get("projects");
+  const projects = getProjectsArray();
   const project = projects.find((p) => p.id === projectId);
 
   if (!project) throw new Error("Project not found");
@@ -100,9 +132,9 @@ export function setProjectPublic(projectId) {
 }
 
 export function registerBranch(projectId, branchName, visibility = "private") {
-  const projects = store.get("projects");
+  const projects = getProjectsArray();
   const project = projects.find((p) => p.id === projectId);
-  const self = getSelf();
+  const self = getSelfOrThrow();
 
   if (!project) throw new Error("Project not found");
 
@@ -124,9 +156,9 @@ export function registerBranch(projectId, branchName, visibility = "private") {
 }
 
 export function deleteBranch(projectId, branchName) {
-  const projects = store.get("projects");
+  const projects = getProjectsArray();
   const project = projects.find((p) => p.id === projectId);
-  const self = getSelf();
+  const self = getSelfOrThrow();
   const requesterEmail = self.email;
   if (!project) throw new Error("Project not found");
 
@@ -156,9 +188,9 @@ export function deleteBranch(projectId, branchName) {
 }
 
 export function setBranchPublic(projectId, branchName) {
-  const projects = store.get("projects");
+  const projects = getProjectsArray();
   const project = projects.find((p) => p.id === projectId);
-  const self = getSelf();
+  const self = getSelfOrThrow();
   const requesterEmail = self.email;
   if (!project) throw new Error("Project not found");
 
