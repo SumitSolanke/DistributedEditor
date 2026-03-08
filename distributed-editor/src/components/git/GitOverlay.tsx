@@ -406,6 +406,13 @@ export default function GitOverlay() {
     selectedBranchMeta.owner === myEmail &&
     !dirty &&
     !busy;
+  const canSetSelectedBranchPublic =
+    Boolean(projectId) &&
+    isProjectPublic &&
+    Boolean(checkoutBranch) &&
+    selectedBranchMeta?.owner === myEmail &&
+    selectedBranchMeta?.visibility === "private" &&
+    !busy;
 
   const runAndRefresh = useCallback(
     async (
@@ -631,6 +638,21 @@ export default function GitOverlay() {
       { successMessage: "Project is now public." },
     );
   }, [projectId, runAndRefresh]);
+
+  const handleSetSelectedBranchPublic = useCallback(async () => {
+    if (!window.api?.gitSetBranchPublic || !projectId || !checkoutBranch) return;
+
+    await runAndRefresh(
+      () =>
+        window.api.gitSetBranchPublic!({
+          projectId,
+          branchName: checkoutBranch,
+        }),
+      {
+        successMessage: `Branch "${checkoutBranch}" is now public.`,
+      },
+    );
+  }, [checkoutBranch, projectId, runAndRefresh]);
 
   const handleSyncProject = useCallback(async () => {
     if (!window.api?.syncProject || !projectId) return;
@@ -918,6 +940,14 @@ export default function GitOverlay() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <button
+                    className="px-3 py-1.5 text-xs rounded bg-[#2d2d2d] hover:bg-[#3a3a3a] disabled:opacity-50"
+                    onClick={() => void handleSetSelectedBranchPublic()}
+                    disabled={!canSetSelectedBranchPublic}
+                  >
+                    Make Selected Branch Public
+                  </button>
+
                   <button
                     className="px-3 py-1.5 text-xs rounded bg-[#2d2d2d] hover:bg-[#3a3a3a] disabled:opacity-50 inline-flex items-center gap-1"
                     onClick={() => void handleDiscardAll()}

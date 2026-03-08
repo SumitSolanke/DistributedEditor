@@ -51,7 +51,11 @@ export function registerGitHandlers() {
       if (!project?.public) return;
 
       const branchMeta = project.branches?.[branchName];
-      if (!branchMeta || branchMeta.visibility !== "public") {
+      if (!branchMeta) {
+        return;
+      }
+
+      if (branchMeta.visibility !== "public") {
         return;
       }
 
@@ -437,6 +441,7 @@ export function registerGitHandlers() {
         }
 
         await revertLastCommit(getProjectPath(projectName), branchName, self);
+        await triggerProjectSyncForPublicBranch(projectId, branchName);
 
         return { success: true };
       } catch (error) {
@@ -476,6 +481,7 @@ export function registerGitHandlers() {
           targetCommit,
           self,
         );
+        await triggerProjectSyncForPublicBranch(projectId, branchName);
 
         return { success: true };
       } catch (error) {
@@ -523,6 +529,7 @@ export function registerGitHandlers() {
         }
 
         await revertCommit(getProjectPath(projectName), branchName, commitOid, self);
+        await triggerProjectSyncForPublicBranch(projectId, branchName);
 
         return { success: true };
       } catch (error) {
