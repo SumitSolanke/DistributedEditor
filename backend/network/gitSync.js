@@ -300,7 +300,8 @@ export async function updateRefs(projectPath, remoteRefs) {
       dir: projectPath,
       ref: `refs/heads/${branch}`,
       value: remoteOid,
-      force: false,
+      // Safe because we already gate with canFastForward (no rollback).
+      force: true,
     });
 
     updatedBranches.add(branch);
