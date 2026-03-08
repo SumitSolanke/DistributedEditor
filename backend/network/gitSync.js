@@ -145,7 +145,8 @@ async function collectTreeObjects(projectPath, treeOid, visitedObjects, objects)
       objects.push({
         type: "blob",
         oid: entry.oid,
-        data: blob.blob,
+        encoding: "base64",
+        data: Buffer.from(blob.blob).toString("base64"),
       });
       continue;
     }
@@ -224,10 +225,11 @@ export async function applyObjects(projectPath, objects) {
 
   for (const obj of orderedObjects) {
     if (obj.type === "blob") {
+      const blobData = decodeBlobPayload(obj);
       await git.writeBlob({
         fs,
         dir: projectPath,
-        blob: obj.data,
+        blob: blobData,
       });
     }
 
@@ -333,4 +335,48 @@ export async function applyFetch(projectPath, objects, remoteRefs) {
       force: true,
     });
   }
+}
+
+function decodeBlobPayload(obj) {
+  if (!obj) {
+    throw new Error("Invalid blob payload");
+  }
+
+  if (obj.encoding === "base64" && typeof obj.data === "string") {
+    return Buffer.from(obj.data, "base64");
+  }
+
+  if (
+    obj.data &&
+    typeof obj.data === "object" &&
+    obj.data.type === "Buffer" &&
+    Array.isArray(obj.data.data)
+  ) {
+    return Buffer.from(obj.data.data);
+  }
+
+  if (Array.isArray(obj.data)) {
+    return Uint8Array.from(obj.data);
+  }
+
+  if (obj.data && typeof obj.data === "object") {
+    const numericKeys = Object.keys(obj.data)
+      .filter((key) => /^\d+$/.test(key))
+      .map((key) => Number(key))
+      .sort((a, b) => a - b);
+
+    if (numericKeys.length) {
+      const bytes = new Uint8Array(numericKeys.length);
+      for (let i = 0; i < numericKeys.length; i += 1) {
+        bytes[i] = obj.data[String(numericKeys[i])] || 0;
+      }
+      return bytes;
+    }
+  }
+
+  if (typeof obj.data === "string") {
+    return Buffer.from(obj.data);
+  }
+
+  throw new Error("Unsupported blob payload format");
 }

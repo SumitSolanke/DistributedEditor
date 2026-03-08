@@ -47,6 +47,10 @@ function isPublicProject(project) {
   return Boolean(project?.public);
 }
 
+function getUserLocalMainBranch(email) {
+  return `${email}/local-main`;
+}
+
 function getPublicBranchNames(project) {
   const branches = project?.branches || {};
   const publicBranchNames = Object.entries(branches)
@@ -89,6 +93,90 @@ async function ensureProjectRepo(projectName) {
   }
 
   return projectPath;
+}
+
+async function ensureLocalMainBranchAndCheckout(project) {
+  const self = getSelf();
+  if (!project || !self?.email) return;
+
+  const projectPath = await ensureProjectRepo(project.name);
+  const localMain = getUserLocalMainBranch(self.email);
+
+  const branches = await git.listBranches({
+    fs,
+    dir: projectPath,
+  });
+  let createdLocalMain = false;
+
+  if (!branches.includes(localMain)) {
+    let sourceOid = null;
+
+    try {
+      sourceOid = await git.resolveRef({
+        fs,
+        dir: projectPath,
+        ref: "global-main",
+      });
+    } catch {
+      // fallback to first branch if global-main is missing
+    }
+
+    if (!sourceOid && branches.length) {
+      try {
+        sourceOid = await git.resolveRef({
+          fs,
+          dir: projectPath,
+          ref: branches[0],
+        });
+      } catch {
+        // keep null, branch creation below will fallback
+      }
+    }
+
+    if (!sourceOid) {
+      return;
+    }
+
+    await git.branch({
+      fs,
+      dir: projectPath,
+      ref: localMain,
+      object: sourceOid,
+    });
+    createdLocalMain = true;
+  }
+
+  const currentBranch = await git.currentBranch({
+    fs,
+    dir: projectPath,
+    fullname: false,
+  });
+
+  if (createdLocalMain && currentBranch !== localMain) {
+    await git.checkout({
+      fs,
+      dir: projectPath,
+      ref: localMain,
+      force: true,
+    });
+  }
+
+  const projects = getProjects();
+  const index = projects.findIndex((item) => item?.id === project.id);
+  if (index === -1) return;
+
+  const existing = projects[index];
+  if (!existing.branches) {
+    existing.branches = {};
+  }
+
+  if (!existing.branches[localMain]) {
+    existing.branches[localMain] = {
+      owner: self.email,
+      visibility: "private",
+    };
+    projectStore.set("projects", projects);
+  }
 }
 
 export async function askPeerProjectStatus(socket, projectId) {
@@ -194,6 +282,7 @@ export async function handleSyncObjects(projectId, objects, refs, userEmail) {
   }
 
   await applyFetch(projectPath, objects || [], refs || {});
+  await ensureLocalMainBranchAndCheckout(project);
 }
 
 export async function handleProjectMetadata(data) {
@@ -218,6 +307,7 @@ export async function handleProjectMetadata(data) {
 
   projectStore.set("projects", projects);
   await ensureProjectRepo(project.name);
+  await ensureLocalMainBranchAndCheckout(project);
 }
 
 export async function handleProjectRefs(socket, projectId, refs = {}) {
