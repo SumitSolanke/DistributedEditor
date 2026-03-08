@@ -255,16 +255,58 @@ export async function applyObjects(projectPath, objects) {
 /* UPDATE REFS */
 /* ------------------------------------------------ */
 
+async function canFastForward(projectPath, branch, remoteOid) {
+  let localOid = null;
+  try {
+    localOid = await git.resolveRef({
+      fs,
+      dir: projectPath,
+      ref: branch,
+    });
+  } catch {
+    return true; // local branch missing -> create/update is safe
+  }
+
+  if (localOid === remoteOid) {
+    return false; // already up to date
+  }
+
+  const bases = await git.findMergeBase({
+    fs,
+    dir: projectPath,
+    oids: [localOid, remoteOid],
+  });
+
+  if (!bases.length) {
+    return false;
+  }
+
+  return bases.includes(localOid);
+}
+
 export async function updateRefs(projectPath, remoteRefs) {
+  const updatedBranches = new Set();
+
   for (const branch in remoteRefs) {
+    const remoteOid = remoteRefs[branch];
+    const shouldUpdate = await canFastForward(projectPath, branch, remoteOid);
+
+    if (!shouldUpdate) {
+      continue;
+    }
+
     await git.writeRef({
       fs,
       dir: projectPath,
       ref: `refs/heads/${branch}`,
-      value: remoteRefs[branch],
-      force: true,
+      value: remoteOid,
+      force: false,
     });
+
+    updatedBranches.add(branch);
   }
+
+  return updatedBranches;
 }
 
 /* ------------------------------------------------ */
@@ -319,7 +361,7 @@ export async function applyFetch(projectPath, objects, remoteRefs) {
 
   await applyObjects(projectPath, objects);
 
-  await updateRefs(projectPath, remoteRefs);
+  const updatedBranches = await updateRefs(projectPath, remoteRefs);
 
   const currentBranch = await git.currentBranch({
     fs,
@@ -327,7 +369,7 @@ export async function applyFetch(projectPath, objects, remoteRefs) {
     fullname: false,
   });
 
-  if (currentBranch && remoteRefs[currentBranch]) {
+  if (currentBranch && updatedBranches.has(currentBranch)) {
     await git.checkout({
       fs,
       dir: projectPath,

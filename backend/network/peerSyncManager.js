@@ -170,10 +170,16 @@ async function ensureLocalMainBranchAndCheckout(project) {
     existing.branches = {};
   }
 
-  if (!existing.branches[localMain]) {
+  const desiredVisibility = project.public ? "public" : "private";
+  const localMainMeta = existing.branches[localMain];
+  if (
+    !localMainMeta ||
+    localMainMeta.owner !== self.email ||
+    localMainMeta.visibility !== desiredVisibility
+  ) {
     existing.branches[localMain] = {
       owner: self.email,
-      visibility: "private",
+      visibility: desiredVisibility,
     };
     projectStore.set("projects", projects);
   }
