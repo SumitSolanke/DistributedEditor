@@ -74,6 +74,7 @@ export default function GitOverlay() {
   const [toastMessage, setToastMessage] = useState("");
   const [toastTone, setToastTone] = useState<"error" | "success">("error");
   const [busy, setBusy] = useState(false);
+  const [syncingProject, setSyncingProject] = useState(false);
 
   const [ctx, setCtx] = useState<CommitContextState>({
     open: false,
@@ -631,6 +632,27 @@ export default function GitOverlay() {
     );
   }, [projectId, runAndRefresh]);
 
+  const handleSyncProject = useCallback(async () => {
+    if (!window.api?.syncProject || !projectId) return;
+    if (syncingProject) return;
+
+    setSyncingProject(true);
+    try {
+      const res = await window.api.syncProject({ projectId });
+      if (!res?.success) {
+        showError(res?.error || "Unable to trigger project sync.");
+        return;
+      }
+      showSuccess("Project sync triggered.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to trigger project sync.";
+      showError(message);
+    } finally {
+      setSyncingProject(false);
+    }
+  }, [projectId, showError, showSuccess, syncingProject]);
+
   const handleMerge = useCallback(async () => {
     if (
       !window.api?.gitMerge ||
@@ -842,15 +864,34 @@ export default function GitOverlay() {
                   </div>
                 ) : null}
 
-                {!isProjectPublic && window.api?.setProjectPublic ? (
+                <div className="flex items-center gap-2">
+                  {!isProjectPublic && window.api?.setProjectPublic ? (
+                    <button
+                      className="px-3 py-1.5 text-xs rounded bg-[#2d2d2d] hover:bg-[#3a3a3a]"
+                      onClick={() => void handleSetProjectPublic()}
+                      disabled={busy || syncingProject}
+                    >
+                      Make Project Public
+                    </button>
+                  ) : null}
+
                   <button
-                    className="px-3 py-1.5 text-xs rounded bg-[#2d2d2d] hover:bg-[#3a3a3a]"
-                    onClick={() => void handleSetProjectPublic()}
-                    disabled={busy}
+                    className="px-3 py-1.5 text-xs rounded bg-[#2d2d2d] hover:bg-[#3a3a3a] disabled:opacity-50 inline-flex items-center gap-1"
+                    onClick={() => void handleSyncProject()}
+                    disabled={!projectId || !isProjectPublic || busy || syncingProject}
+                    title={
+                      isProjectPublic
+                        ? "Sync current project across connected peers"
+                        : "Project must be public before sync"
+                    }
                   >
-                    Make Project Public
+                    <RefreshCw
+                      size={13}
+                      className={syncingProject ? "animate-spin" : ""}
+                    />
+                    Sync Project
                   </button>
-                ) : null}
+                </div>
               </section>
 
               <section className="bg-[#1f1f1f] border border-gray-700 rounded p-3 space-y-2">

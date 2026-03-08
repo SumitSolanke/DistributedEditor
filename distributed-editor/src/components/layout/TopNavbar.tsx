@@ -1,4 +1,12 @@
-import { PanelLeft, PanelRight, Github, Save, RotateCcw } from "lucide-react";
+import { useCallback, useState } from "react";
+import {
+  PanelLeft,
+  PanelRight,
+  Github,
+  Save,
+  RotateCcw,
+  RefreshCw,
+} from "lucide-react";
 import { useEditorStore } from "../../store/editorStore";
 import { useAuthStore } from "../../store/authStore";
 import { useChatStore } from "../../store/chatStore";
@@ -35,6 +43,7 @@ const Badge = ({ n }: { n: number }) => {
 
 export default function TopNavbar({ toggleLeft, toggleRight }: Props) {
   const { setActiveSidebar, activeFileId } = useEditorStore();
+  const [syncingAll, setSyncingAll] = useState(false);
 
   const user = useAuthStore((s) => s.user);
   const reset = useAuthStore((s) => s.reset);
@@ -46,6 +55,31 @@ export default function TopNavbar({ toggleLeft, toggleRight }: Props) {
     if (activeFileId) {
     }
   };
+
+  const handleSyncAll = useCallback(async () => {
+    if (syncingAll) return;
+    setSyncingAll(true);
+    try {
+      if (window.api?.syncNetworkAndProjects) {
+        const res = await window.api.syncNetworkAndProjects();
+        if (!res?.success) {
+          throw new Error(res?.error || "Unable to sync network and projects.");
+        }
+        return;
+      }
+
+      if (window.api?.syncAllProjects) {
+        const res = await window.api.syncAllProjects();
+        if (!res?.success) {
+          throw new Error(res?.error || "Unable to sync projects.");
+        }
+      }
+    } catch (error) {
+      console.error("Manual full sync failed:", error);
+    } finally {
+      setSyncingAll(false);
+    }
+  }, [syncingAll]);
 
   const displayName = user?.name ?? "Guest";
   const displayRole = user?.role ?? "viewer";
@@ -81,6 +115,15 @@ export default function TopNavbar({ toggleLeft, toggleRight }: Props) {
           className="hover:text-green-400"
         >
           <Save size={20} />
+        </button>
+
+        <button
+          onClick={() => void handleSyncAll()}
+          title="Sync network and all public projects"
+          className="hover:text-cyan-300 disabled:opacity-50"
+          disabled={syncingAll}
+        >
+          <RefreshCw size={20} className={syncingAll ? "animate-spin" : ""} />
         </button>
 
         <button

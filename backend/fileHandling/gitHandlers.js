@@ -28,6 +28,7 @@ import {
 } from "../storage/project.js";
 import { getProjectById } from "../storage/project.js";
 import { getSelf } from "../storage/store.js";
+import { triggerProjectSync } from "../network/websocketSync.js";
 import path from "path";
 import { app } from "electron";
 import git from "isomorphic-git";
@@ -40,6 +41,27 @@ export function registerGitHandlers() {
 
   function getProjectPath(projectName) {
     return path.join(projectsRoot, projectName);
+  }
+
+  async function triggerProjectSyncForPublicBranch(projectId, branchName) {
+    try {
+      if (!projectId || !branchName) return;
+
+      const project = getProjectById(projectId);
+      if (!project?.public) return;
+
+      const branchMeta = project.branches?.[branchName];
+      if (!branchMeta || branchMeta.visibility !== "public") {
+        return;
+      }
+
+      await triggerProjectSync(projectId);
+    } catch (error) {
+      console.warn(
+        `Project sync trigger failed for ${projectId}/${branchName}:`,
+        error?.message || error,
+      );
+    }
   }
 
   // // INIT REPO (called after project creation)
@@ -153,6 +175,7 @@ export function registerGitHandlers() {
 
         // 4️⃣ Safe commit
         const oid = await commitChanges(projectPath, message, self);
+        await triggerProjectSyncForPublicBranch(projectId, currentBranch);
 
         return {
           success: true,
@@ -192,6 +215,10 @@ export function registerGitHandlers() {
           throw metaError;
         }
 
+        if (visibility === "public") {
+          await triggerProjectSyncForPublicBranch(projectId, fullBranchName);
+        }
+
         return {
           success: true,
           branchName: fullBranchName,
@@ -226,6 +253,10 @@ export function registerGitHandlers() {
           // 🔁 Rollback git branch if metadata fails
           await deleteGitBranch(projectPath, fullBranchName);
           throw metaError;
+        }
+
+        if (visibility === "public") {
+          await triggerProjectSyncForPublicBranch(projectId, fullBranchName);
         }
 
         return {
@@ -270,6 +301,7 @@ export function registerGitHandlers() {
     async (event, { projectId, branchName }) => {
       try {
         setBranchPublic(projectId, branchName);
+        await triggerProjectSyncForPublicBranch(projectId, branchName);
 
         return {
           success: true,
@@ -326,6 +358,8 @@ export function registerGitHandlers() {
             ? `Fast-forward merged ${theirs} into ${ours}.`
             : `Merged ${theirs} into ${ours}.`;
 
+        await triggerProjectSyncForPublicBranch(projectId, ours);
+
         return { success: true, result, message };
       } catch (error) {
         const code =
@@ -367,6 +401,7 @@ export function registerGitHandlers() {
         }
 
         await rebaseBranch(getProjectPath(projectName), branch, onto, self);
+        await triggerProjectSyncForPublicBranch(projectId, branch);
 
         return { success: true };
       } catch (error) {
@@ -624,3 +659,4 @@ export function registerGitHandlers() {
     }
   });
 }
+

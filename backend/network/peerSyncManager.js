@@ -1,0 +1,235 @@
+import path from "node:path";
+import { app } from "electron";
+import git from "isomorphic-git";
+import fs from "fs-extra";
+
+import {
+  getAllRefs,
+  prepareFetch,
+  prepareObjectsForPeer,
+  applyFetch,
+} from "./gitSync.js";
+import {
+  hasUncommittedChanges,
+  discardAllUncommittedChanges,
+  getCurrentBranch,
+  analyzeBranch,
+} from "../fileHandling/gitManager.js";
+import projectStore, { getProjectById, getProjects } from "../storage/project.js";
+import { getSelf } from "../storage/store.js";
+
+function getProjectsRoot() {
+  return path.join(app.getPath("userData"), "projects");
+}
+
+export function getProjectPath(projectName) {
+  return path.join(getProjectsRoot(), projectName);
+}
+
+function socketReady(socket) {
+  return Boolean(socket) && socket.readyState === 1;
+}
+
+function sendToPeer(socket, payload) {
+  if (!socketReady(socket)) return false;
+
+  const self = getSelf();
+  socket.send(
+    JSON.stringify({
+      ...payload,
+      senderEmail: self?.email || "",
+    }),
+  );
+  return true;
+}
+
+function isPublicProject(project) {
+  return Boolean(project?.public);
+}
+
+function getPublicBranchNames(project) {
+  const branches = project?.branches || {};
+  const publicBranchNames = Object.entries(branches)
+    .filter(([, meta]) => meta && meta.visibility === "public")
+    .map(([name]) => name);
+
+  if (!publicBranchNames.length && branches["global-main"]) {
+    return ["global-main"];
+  }
+
+  return publicBranchNames;
+}
+
+async function getPublicRefs(projectPath, project) {
+  const allRefs = await getAllRefs(projectPath);
+  const allowed = new Set(getPublicBranchNames(project));
+  const filtered = {};
+
+  for (const [branch, oid] of Object.entries(allRefs)) {
+    if (allowed.has(branch)) {
+      filtered[branch] = oid;
+    }
+  }
+
+  return filtered;
+}
+
+async function ensureProjectRepo(projectName) {
+  const projectPath = getProjectPath(projectName);
+  await fs.ensureDir(projectPath);
+
+  const gitDir = path.join(projectPath, ".git");
+  const exists = await fs.pathExists(gitDir);
+  if (!exists) {
+    await git.init({
+      fs,
+      dir: projectPath,
+      defaultBranch: "global-main",
+    });
+  }
+
+  return projectPath;
+}
+
+export async function askPeerProjectStatus(socket, projectId) {
+  sendToPeer(socket, {
+    type: "PROJECT_STATUS",
+    projectId,
+  });
+}
+
+export async function handlePeerProjectStatus(socket, data) {
+  const { projectId, hasProject } = data || {};
+  if (!projectId) return;
+
+  const project = getProjectById(projectId);
+  if (!project || !isPublicProject(project)) return;
+
+  if (!hasProject) {
+    await sendProjectMetadata(socket, project);
+    await sendFullProject(socket, project);
+    return;
+  }
+
+  await syncWithPeer(socket, project);
+}
+
+async function sendProjectMetadata(socket, project) {
+  sendToPeer(socket, {
+    type: "PROJECT_METADATA",
+    project,
+  });
+}
+
+async function sendFullProject(socket, project) {
+  const projectPath = getProjectPath(project.name);
+  const refs = await getPublicRefs(projectPath, project);
+
+  sendToPeer(socket, {
+    type: "PROJECT_REFS",
+    projectId: project.id,
+    refs,
+  });
+}
+
+export async function syncWithPeer(socket, project) {
+  if (!project || !isPublicProject(project)) return;
+
+  const projectPath = getProjectPath(project.name);
+  const refs = await getPublicRefs(projectPath, project);
+
+  sendToPeer(socket, {
+    type: "SYNC_REFS",
+    projectId: project.id,
+    refs,
+  });
+}
+
+export async function handleSyncRefs(socket, projectId, remoteRefs = {}) {
+  const project = getProjectById(projectId);
+  if (!project || !isPublicProject(project)) return;
+
+  const projectPath = getProjectPath(project.name);
+  const { have } = await prepareFetch(projectPath, remoteRefs);
+
+  sendToPeer(socket, {
+    type: "SYNC_HAVE",
+    projectId,
+    have,
+  });
+}
+
+export async function handleSyncHave(socket, projectId, peerHave = []) {
+  const project = getProjectById(projectId);
+  if (!project || !isPublicProject(project)) return;
+
+  const projectPath = getProjectPath(project.name);
+  const refs = await getPublicRefs(projectPath, project);
+  const objects = await prepareObjectsForPeer(projectPath, refs, peerHave);
+
+  sendToPeer(socket, {
+    type: "SYNC_OBJECTS",
+    projectId,
+    objects,
+    refs,
+  });
+}
+
+export async function handleSyncObjects(projectId, objects, refs, userEmail) {
+  const project = getProjectById(projectId);
+  if (!project || !isPublicProject(project)) return;
+
+  const projectPath = getProjectPath(project.name);
+  const dirty = await hasUncommittedChanges(projectPath);
+
+  if (dirty) {
+    const currentBranch = await getCurrentBranch(projectPath);
+    const branchInfo = analyzeBranch(currentBranch, userEmail);
+
+    if (branchInfo.type === "user" && branchInfo.owner !== userEmail) {
+      await discardAllUncommittedChanges(projectPath);
+    } else {
+      throw new Error("Working directory dirty. Cannot sync.");
+    }
+  }
+
+  await applyFetch(projectPath, objects || [], refs || {});
+}
+
+export async function handleProjectMetadata(data) {
+  const project = data?.project;
+  if (!project || !project.id || !project.name) return;
+
+  const projects = getProjects();
+  const existingIndex = projects.findIndex((entry) => entry?.id === project.id);
+
+  if (existingIndex === -1) {
+    projects.push(project);
+  } else {
+    projects[existingIndex] = {
+      ...projects[existingIndex],
+      ...project,
+      branches: {
+        ...(projects[existingIndex]?.branches || {}),
+        ...(project.branches || {}),
+      },
+    };
+  }
+
+  projectStore.set("projects", projects);
+  await ensureProjectRepo(project.name);
+}
+
+export async function handleProjectRefs(socket, projectId, refs = {}) {
+  const project = getProjectById(projectId);
+  if (!project || !isPublicProject(project)) return;
+
+  const projectPath = await ensureProjectRepo(project.name);
+  const { have } = await prepareFetch(projectPath, refs);
+
+  sendToPeer(socket, {
+    type: "SYNC_HAVE",
+    projectId,
+    have,
+  });
+}

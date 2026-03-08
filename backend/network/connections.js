@@ -6,7 +6,8 @@ import {
   getSelf,
 } from "../storage/store.js";
 import { ipcMain } from "electron/main";
-import { syncWithDevice } from "./websockets.js";
+import { broadcastToAll, syncWithDevice } from "./websockets.js";
+import { triggerProjectSync, triggerSyncAllProjects } from "./websocketSync.js";
 
 export function registerUser(data) {
   registerSelf(data);
@@ -76,6 +77,37 @@ export function registerHandlers() {
     } catch (e) {
       console.error("IPC getConnections error:", e);
       return { success: false, error: String(e), connections: [] };
+    }
+  });
+
+  ipcMain.handle("sync-project", async (event, payload) => {
+    try {
+      await triggerProjectSync(payload?.projectId);
+      return { success: true };
+    } catch (e) {
+      console.error("IPC sync-project error:", e);
+      return { success: false, error: String(e) };
+    }
+  });
+
+  ipcMain.handle("sync-all-projects", async () => {
+    try {
+      await triggerSyncAllProjects();
+      return { success: true };
+    } catch (e) {
+      console.error("IPC sync-all-projects error:", e);
+      return { success: false, error: String(e) };
+    }
+  });
+
+  ipcMain.handle("sync-network-and-projects", async () => {
+    try {
+      broadcastToAll();
+      await triggerSyncAllProjects();
+      return { success: true };
+    } catch (e) {
+      console.error("IPC sync-network-and-projects error:", e);
+      return { success: false, error: String(e) };
     }
   });
 }

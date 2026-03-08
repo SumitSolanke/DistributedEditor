@@ -48,6 +48,18 @@ export interface ElectronAPI {
     success: boolean;
     connections?: ConnectionItem[];
   }>;
+  syncProject?: (data: { projectId: string }) => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+  syncAllProjects?: () => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+  syncNetworkAndProjects?: () => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
   addProject?: (data: {
     projectName: string;
     connections: Array<{ username: string; ip: string; email: string }>;

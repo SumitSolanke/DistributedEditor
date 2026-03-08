@@ -7,6 +7,7 @@ import {
   setProjectPublic,
 } from "../storage/project.js";
 import { addProjectFolder, deleteProjectFolder } from "./fileOperations.js";
+import { triggerProjectSync } from "../network/websocketSync.js";
 
 export function registerProjectHandlers() {
   ipcMain.handle("add-project", async (event, data) => {
@@ -23,6 +24,9 @@ export function registerProjectHandlers() {
       );
       projectAdded = true;
       await addProjectFolder(projectName);
+      if (isPublic && createdProjectId) {
+        await triggerProjectSync(createdProjectId);
+      }
       return { success: true };
     } catch (error) {
       if (projectAdded && createdProjectId) {
@@ -62,6 +66,7 @@ export function registerProjectHandlers() {
       const { id } = data;
 
       setProjectPublic(id);
+      await triggerProjectSync(id);
       return { success: true };
     } catch (error) {
       return { success: false, message: error.message };

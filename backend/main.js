@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu, ipcMain } from "electron/main";
 import connections from "./network/connections.js";
 import files from "./fileHandling/fileOperations.js";
 import { broadcastToAll } from "./network/websockets.js";
+import { triggerSyncAllProjectsAtStartup } from "./network/websocketSync.js";
 import { user as userStore, devices } from "./storage/store.js";
 import { registerProjectHandlers } from "./fileHandling/project.js";
 import { registerGitHandlers } from "./fileHandling/gitHandlers.js";
@@ -38,6 +39,14 @@ app.whenReady().then(() => {
     // if broadcastToAll is not available, ignore
     console.warn("broadcastToAll not available at startup:", e?.message || e);
   }
+  setTimeout(() => {
+    void triggerSyncAllProjectsAtStartup().catch((error) => {
+      console.warn(
+        "Project sync at startup failed:",
+        error?.message || error,
+      );
+    });
+  }, 1500);
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
