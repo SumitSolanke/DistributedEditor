@@ -355,10 +355,6 @@ export async function applyFetch(projectPath, objects, remoteRefs) {
     return head !== workdir || workdir !== stage;
   });
 
-  if (hasChanges) {
-    throw new Error("Working directory dirty. Cannot sync.");
-  }
-
   await applyObjects(projectPath, objects);
 
   const updatedBranches = await updateRefs(projectPath, remoteRefs);
@@ -369,7 +365,7 @@ export async function applyFetch(projectPath, objects, remoteRefs) {
     fullname: false,
   });
 
-  if (currentBranch && updatedBranches.has(currentBranch)) {
+  if (currentBranch && updatedBranches.has(currentBranch) && !hasChanges) {
     await git.checkout({
       fs,
       dir: projectPath,

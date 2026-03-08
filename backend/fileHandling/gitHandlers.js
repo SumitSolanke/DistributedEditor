@@ -609,16 +609,9 @@ export function registerGitHandlers() {
     async (event, { projectId, projectName, branchName }) => {
       try {
         const project = getProjectById(projectId);
-        const self = getSelf();
-        const requesterEmail = self.email;
 
         if (!project) {
           throw new Error("Project not found");
-        }
-
-        const branch = project.branches[branchName];
-        if (!branch) {
-          throw new Error("Branch not found");
         }
 
         const history = await getBranchCommitHistory(

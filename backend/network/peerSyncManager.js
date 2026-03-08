@@ -51,6 +51,60 @@ function getUserLocalMainBranch(email) {
   return `${email}/local-main`;
 }
 
+function resolveBranchOwner(branchName, project) {
+  if (branchName === "global-main") {
+    return project?.owner?.email || project?.owner || "system";
+  }
+
+  if (typeof branchName === "string" && branchName.includes("/")) {
+    return branchName.split("/")[0];
+  }
+
+  return project?.owner?.email || project?.owner || "system";
+}
+
+function upsertPublicBranchMetadata(projectId, refs = {}) {
+  const project = getProjectById(projectId);
+  if (!project || !project.public) return;
+
+  const projects = getProjects();
+  const index = projects.findIndex((item) => item?.id === projectId);
+  if (index === -1) return;
+
+  const nextProject = { ...projects[index] };
+  const currentBranches = { ...(nextProject.branches || {}) };
+  let changed = false;
+
+  for (const branchName of Object.keys(refs || {})) {
+    const existing = currentBranches[branchName];
+    const owner = resolveBranchOwner(branchName, nextProject);
+
+    if (!existing) {
+      currentBranches[branchName] = {
+        owner,
+        visibility: "public",
+      };
+      changed = true;
+      continue;
+    }
+
+    if (existing.visibility !== "public" || existing.owner !== owner) {
+      currentBranches[branchName] = {
+        ...existing,
+        owner,
+        visibility: "public",
+      };
+      changed = true;
+    }
+  }
+
+  if (!changed) return;
+
+  nextProject.branches = currentBranches;
+  projects[index] = nextProject;
+  projectStore.set("projects", projects);
+}
+
 function getPublicBranchNames(project) {
   const branches = project?.branches || {};
   const publicBranchNames = Object.entries(branches)
@@ -242,6 +296,7 @@ export async function syncWithPeer(socket, project) {
 export async function handleSyncRefs(socket, projectId, remoteRefs = {}) {
   const project = getProjectById(projectId);
   if (!project || !isPublicProject(project)) return;
+  upsertPublicBranchMetadata(projectId, remoteRefs);
 
   const projectPath = getProjectPath(project.name);
   const { have } = await prepareFetch(projectPath, remoteRefs);
@@ -272,6 +327,7 @@ export async function handleSyncHave(socket, projectId, peerHave = []) {
 export async function handleSyncObjects(projectId, objects, refs, userEmail) {
   const project = getProjectById(projectId);
   if (!project || !isPublicProject(project)) return;
+  upsertPublicBranchMetadata(projectId, refs || {});
 
   const projectPath = getProjectPath(project.name);
   const dirty = await hasUncommittedChanges(projectPath);
@@ -282,8 +338,6 @@ export async function handleSyncObjects(projectId, objects, refs, userEmail) {
 
     if (branchInfo.type === "user" && branchInfo.owner !== userEmail) {
       await discardAllUncommittedChanges(projectPath);
-    } else {
-      throw new Error("Working directory dirty. Cannot sync.");
     }
   }
 
@@ -319,6 +373,7 @@ export async function handleProjectMetadata(data) {
 export async function handleProjectRefs(socket, projectId, refs = {}) {
   const project = getProjectById(projectId);
   if (!project || !isPublicProject(project)) return;
+  upsertPublicBranchMetadata(projectId, refs);
 
   const projectPath = await ensureProjectRepo(project.name);
   const { have } = await prepareFetch(projectPath, refs);
