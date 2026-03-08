@@ -38,24 +38,99 @@ import { ipcMain } from "electron/main";
 export function registerGitHandlers() {
   const userDataPath = app.getPath("userData");
   const projectsRoot = path.join(userDataPath, "projects");
+  const HEADS_PREFIX = "refs/heads/";
 
   function getProjectPath(projectName) {
     return path.join(projectsRoot, projectName);
   }
 
-  async function triggerProjectSyncForPublicBranch(projectId, branchName) {
+  function normalizeBranchName(branchName) {
+    if (typeof branchName !== "string") return "";
+    const trimmed = branchName.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith(HEADS_PREFIX)) {
+      return trimmed.slice(HEADS_PREFIX.length);
+    }
+    return trimmed;
+  }
+
+  function isBranchMetaPublic(branchMeta) {
+    if (!branchMeta || typeof branchMeta !== "object") return false;
+    if (branchMeta.visibility === "public") return true;
+    if (branchMeta.public === true) return true;
+    if (branchMeta.isPublic === true) return true;
+    return false;
+  }
+
+  function resolveProjectBranch(project, branchName) {
+    const branches = project?.branches || {};
+    const normalized = normalizeBranchName(branchName);
+    if (!normalized) {
+      return {
+        branchName: "",
+        branchMeta: null,
+      };
+    }
+
+    if (branches[normalized]) {
+      return {
+        branchName: normalized,
+        branchMeta: branches[normalized],
+      };
+    }
+
+    if (normalized === "local-main") {
+      const self = getSelf();
+      const selfLocalMain = self?.email ? `${self.email}/local-main` : "";
+      if (selfLocalMain && branches[selfLocalMain]) {
+        return {
+          branchName: selfLocalMain,
+          branchMeta: branches[selfLocalMain],
+        };
+      }
+    }
+
+    if (!normalized.includes("/")) {
+      const candidates = Object.keys(branches).filter((name) =>
+        name.endsWith(`/${normalized}`),
+      );
+      if (candidates.length === 1) {
+        return {
+          branchName: candidates[0],
+          branchMeta: branches[candidates[0]],
+        };
+      }
+    }
+
+    return {
+      branchName: normalized,
+      branchMeta: null,
+    };
+  }
+
+  async function triggerProjectSyncForPublicBranch(
+    projectId,
+    branchName,
+    branchMetaOverride = null,
+  ) {
     try {
       if (!projectId || !branchName) return;
 
       const project = getProjectById(projectId);
       if (!project?.public) return;
 
-      const branchMeta = project.branches?.[branchName];
-      if (!branchMeta) {
+      const resolved = resolveProjectBranch(project, branchName);
+      const normalizedBranchName = resolved.branchName;
+      const branchMeta = branchMetaOverride || resolved.branchMeta;
+
+      if (!normalizedBranchName) {
         return;
       }
 
-      if (branchMeta.visibility !== "public") {
+      if (
+        normalizedBranchName !== "global-main" &&
+        !isBranchMetaPublic(branchMeta)
+      ) {
         return;
       }
 
@@ -425,8 +500,10 @@ export function registerGitHandlers() {
 
         if (!project) throw new Error("Project not found");
 
-        const branch = project.branches[branchName];
-        if (!branch) throw new Error("Branch not found");
+        const resolved = resolveProjectBranch(project, branchName);
+        const resolvedBranchName = resolved.branchName;
+        const branch = resolved.branchMeta;
+        if (!branch || !resolvedBranchName) throw new Error("Branch not found");
 
         // 🔒 Rule 1 & 3 — Only branch owner can revert
         if (branch.owner !== requesterEmail) {
@@ -434,14 +511,22 @@ export function registerGitHandlers() {
         }
 
         // 🔒 Rule 2 — Protect global-main
-        if (branchName === "global-main") {
+        if (resolvedBranchName === "global-main") {
           if (project.owner.email !== requesterEmail) {
             throw new Error("Only project owner can revert global-main");
           }
         }
 
-        await revertLastCommit(getProjectPath(projectName), branchName, self);
-        await triggerProjectSyncForPublicBranch(projectId, branchName);
+        await revertLastCommit(
+          getProjectPath(projectName),
+          resolvedBranchName,
+          self,
+        );
+        await triggerProjectSyncForPublicBranch(
+          projectId,
+          resolvedBranchName,
+          branch,
+        );
 
         return { success: true };
       } catch (error) {
@@ -460,8 +545,10 @@ export function registerGitHandlers() {
 
         if (!project) throw new Error("Project not found");
 
-        const branch = project.branches[branchName];
-        if (!branch) throw new Error("Branch not found");
+        const resolved = resolveProjectBranch(project, branchName);
+        const resolvedBranchName = resolved.branchName;
+        const branch = resolved.branchMeta;
+        if (!branch || !resolvedBranchName) throw new Error("Branch not found");
 
         // 🔒 Ownership check
         if (branch.owner !== requesterEmail) {
@@ -469,7 +556,7 @@ export function registerGitHandlers() {
         }
 
         // 🔒 Protect global-main
-        if (branchName === "global-main") {
+        if (resolvedBranchName === "global-main") {
           if (project.owner.email !== requesterEmail) {
             throw new Error("Only project owner can revert global-main");
           }
@@ -477,11 +564,15 @@ export function registerGitHandlers() {
 
         await revertUntilCommit(
           getProjectPath(projectName),
-          branchName,
+          resolvedBranchName,
           targetCommit,
           self,
         );
-        await triggerProjectSyncForPublicBranch(projectId, branchName);
+        await triggerProjectSyncForPublicBranch(
+          projectId,
+          resolvedBranchName,
+          branch,
+        );
 
         return { success: true };
       } catch (error) {
@@ -501,8 +592,10 @@ export function registerGitHandlers() {
 
         if (!project) throw new Error("Project not found");
 
-        const branch = project.branches[branchName];
-        if (!branch) throw new Error("Branch not found");
+        const resolved = resolveProjectBranch(project, branchName);
+        const resolvedBranchName = resolved.branchName;
+        const branch = resolved.branchMeta;
+        if (!branch || !resolvedBranchName) throw new Error("Branch not found");
 
         // 🔒 Ownership enforcement
         if (branch.owner !== requesterEmail) {
@@ -510,7 +603,7 @@ export function registerGitHandlers() {
         }
 
         // 🔒 Protect global-main
-        if (branchName === "global-main") {
+        if (resolvedBranchName === "global-main") {
           if (project.owner.email !== requesterEmail) {
             throw new Error("Only project owner can revert global-main");
           }
@@ -520,7 +613,7 @@ export function registerGitHandlers() {
         const commits = await git.log({
           fs,
           dir: getProjectPath(projectName),
-          ref: branchName,
+          ref: resolvedBranchName,
         });
 
         const commitExists = commits.some((c) => c.oid === commitOid);
@@ -528,8 +621,17 @@ export function registerGitHandlers() {
           throw new Error("Commit does not belong to this branch");
         }
 
-        await revertCommit(getProjectPath(projectName), branchName, commitOid, self);
-        await triggerProjectSyncForPublicBranch(projectId, branchName);
+        await revertCommit(
+          getProjectPath(projectName),
+          resolvedBranchName,
+          commitOid,
+          self,
+        );
+        await triggerProjectSyncForPublicBranch(
+          projectId,
+          resolvedBranchName,
+          branch,
+        );
 
         return { success: true };
       } catch (error) {
