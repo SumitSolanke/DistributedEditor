@@ -52,4 +52,12 @@ contextBridge.exposeInMainWorld("api", {
   commGetProjectThreads: (data) =>
     ipcRenderer.invoke("comm-get-project-threads", data),
   commGetAllThreads: () => ipcRenderer.invoke("comm-get-all-threads"),
+  onCommunicationUpdated: (handler) => {
+    if (typeof handler !== "function") {
+      return () => {};
+    }
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on("comm-updated", listener);
+    return () => ipcRenderer.removeListener("comm-updated", listener);
+  },
 });

@@ -62,6 +62,13 @@ export interface CommunicationThread {
   messages: CommunicationMessage[];
 }
 
+export interface CommunicationUpdateEvent {
+  projectId: string;
+  added: number;
+  updated: number;
+  timestamp: number;
+}
+
 export interface ElectronAPI {
   sendUserData: (data: UserData) => Promise<void>;
   isUserRegistered: () => Promise<boolean>;
@@ -265,6 +272,9 @@ export interface ElectronAPI {
     data?: CommunicationThread[];
     message?: string;
   }>;
+  onCommunicationUpdated?: (
+    handler: (payload: CommunicationUpdateEvent) => void,
+  ) => () => void;
 }
 
 declare global {

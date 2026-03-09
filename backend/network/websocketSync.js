@@ -1,5 +1,6 @@
 import { getProjectById, getProjects } from "../storage/project.js";
 import { getSelf } from "../storage/store.js";
+import { BrowserWindow } from "electron";
 import {
   ensureProjectCommunicationStore,
   getProjectThreadIds,
@@ -55,6 +56,23 @@ function sendMessage(socket, payload) {
     }),
   );
   return true;
+}
+
+function notifyCommunicationUpdated(projectId, summary = {}) {
+  if (!projectId) return;
+  const added = Number(summary?.added || 0);
+  const updated = Number(summary?.updated || 0);
+
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window?.isDestroyed()) {
+      window.webContents.send("comm-updated", {
+        projectId,
+        added,
+        updated,
+        timestamp: Date.now(),
+      });
+    }
+  }
 }
 
 async function ensurePeerSocket(peer) {
@@ -133,7 +151,10 @@ async function handleCommSyncThreads(projectId, threads = []) {
   if (!project) return;
 
   ensureProjectCommunicationStore(projectId);
-  upsertProjectThreads(projectId, Array.isArray(threads) ? threads : []);
+  const summary = upsertProjectThreads(projectId, Array.isArray(threads) ? threads : []);
+  if ((summary?.added || 0) > 0 || (summary?.updated || 0) > 0) {
+    notifyCommunicationUpdated(projectId, summary);
+  }
 }
 
 async function sendCommThreadIds(socket, projectId) {

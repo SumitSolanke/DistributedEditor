@@ -289,6 +289,31 @@ export default function RightSidebar({ isOpen }: Props) {
     setCommunicationThreads,
   ]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const subscribe = window.api?.onCommunicationUpdated;
+    if (!subscribe) return;
+
+    const unsubscribe = subscribe((payload) => {
+      const incomingProjectId =
+        typeof payload?.projectId === "string" ? payload.projectId.trim() : "";
+      if (!incomingProjectId) return;
+
+      if (!currentProject) {
+        void loadGlobalThreads();
+        return;
+      }
+
+      if (incomingProjectId !== currentProject.id) return;
+      if (!activeFilePath) return;
+      void loadFileThreads(true);
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [activeFilePath, currentProject, isOpen, loadFileThreads, loadGlobalThreads]);
+
   const handleOpenThread = useCallback(
     async (thread: CommunicationThread) => {
       if (!window.api?.gitReadFileFromCommit) return;
