@@ -39,8 +39,17 @@ contextBridge.exposeInMainWorld("api", {
   getAllBranches: (data) => ipcRenderer.invoke("git-branches", data),
   gitRepoMap: (data) => ipcRenderer.invoke("git-repo-map", data),
   gitReadCommit: (data) => ipcRenderer.invoke("git-read-commit", data),
+  gitReadFileFromCommit: (data) =>
+    ipcRenderer.invoke("git-read-file-from-commit", data),
   gitDiscardUncommiteChanges: (data) =>
     ipcRenderer.invoke("git-discard-all", data),
   gitBranchHistory: (data) => ipcRenderer.invoke("git-branch-history", data),
   gitDirty: (data) => ipcRenderer.invoke("git-is-dirty", data),
+  commCreateThread: (data) => ipcRenderer.invoke("comm-create-thread", data),
+  commReplyThread: (data) => ipcRenderer.invoke("comm-reply-thread", data),
+  commResolveThread: (data) => ipcRenderer.invoke("comm-resolve-thread", data),
+  commGetFileThreads: (data) => ipcRenderer.invoke("comm-get-file-threads", data),
+  commGetProjectThreads: (data) =>
+    ipcRenderer.invoke("comm-get-project-threads", data),
+  commGetAllThreads: () => ipcRenderer.invoke("comm-get-all-threads"),
 });

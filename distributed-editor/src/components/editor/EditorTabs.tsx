@@ -2,9 +2,21 @@ import { X } from "lucide-react"
 import { useEditorStore } from "../../store/editorStore"
 
 const EditorTabs = () => {
-  const { openFiles, activeFileId, setActiveFile, closeFile } = useEditorStore()
+  const {
+    openFiles,
+    activeFileId,
+    setActiveFile,
+    closeFile,
+    communicationPanelOpen,
+    communicationViewer,
+    activeEditorTab,
+    setActiveEditorTab,
+    closeCommunicationViewer,
+  } = useEditorStore()
 
-  if (openFiles.length === 0) {
+  const showCommunicationTab = communicationPanelOpen && Boolean(communicationViewer)
+
+  if (openFiles.length === 0 && !showCommunicationTab) {
     return (
       <div className="h-10 bg-[#252526] border-b border-gray-700 flex items-center px-3 text-xs text-gray-400">
         No files opened
@@ -15,7 +27,7 @@ const EditorTabs = () => {
   return (
     <div className="h-10 bg-[#252526] border-b border-gray-700 flex items-center overflow-x-auto">
       {openFiles.map((file) => {
-        const isActive = file.id === activeFileId
+        const isActive = activeEditorTab === "file" && file.id === activeFileId
 
         return (
           <div
@@ -51,6 +63,32 @@ const EditorTabs = () => {
           </div>
         )
       })}
+
+      {showCommunicationTab ? (
+        <div
+          onClick={() => setActiveEditorTab("communication")}
+          className={`h-full flex items-center gap-2 px-3 border-r border-gray-700 cursor-pointer whitespace-nowrap ${
+            activeEditorTab === "communication"
+              ? "bg-[#1e1e1e] text-white"
+              : "bg-[#2d2d2d] text-gray-200"
+          } hover:bg-[#1e1e1e]`}
+        >
+          <span className="text-sm flex items-center gap-2">
+            Communication Viewer
+          </span>
+
+          <button
+            className="p-1 rounded hover:bg-gray-700"
+            onClick={(e) => {
+              e.stopPropagation()
+              closeCommunicationViewer()
+            }}
+            title="Close"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -2,10 +2,15 @@ import { app, BrowserWindow, Menu, ipcMain } from "electron/main";
 import connections from "./network/connections.js";
 import files from "./fileHandling/fileOperations.js";
 import { broadcastToAll } from "./network/websockets.js";
-import { triggerSyncAllProjectsAtStartup } from "./network/websocketSync.js";
+import {
+  triggerCommunicationSyncAllProjectsAtStartup,
+  triggerSyncAllProjectsAtStartup,
+} from "./network/websocketSync.js";
 import { user as userStore, devices } from "./storage/store.js";
 import { registerProjectHandlers } from "./fileHandling/project.js";
 import { registerGitHandlers } from "./fileHandling/gitHandlers.js";
+import { registerCommunicationHandlers } from "./fileHandling/communicationHandlers.js";
+import { ensureCommunicationRoot } from "./storage/communication.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,25 +32,35 @@ const createWindow = () => {
 };
 
 app.whenReady().then(() => {
+  ensureCommunicationRoot();
   // Register IPC handlers before creating the window so renderer can call them immediately
   connections.registerHandlers();
   files.fileHandlers();
   registerProjectHandlers();
   registerGitHandlers();
+  registerCommunicationHandlers();
   createWindow();
-  try {
-    broadcastToAll();
-  } catch (e) {
-    // if broadcastToAll is not available, ignore
-    console.warn("broadcastToAll not available at startup:", e?.message || e);
-  }
   setTimeout(() => {
-    void triggerSyncAllProjectsAtStartup().catch((error) => {
-      console.warn(
-        "Project sync at startup failed:",
-        error?.message || error,
-      );
-    });
+    void (async () => {
+      try {
+        // startup sync order: network -> repository -> communication
+        broadcastToAll();
+      } catch (error) {
+        console.warn("Startup network sync trigger failed:", error?.message || error);
+      }
+
+      try {
+        await triggerSyncAllProjectsAtStartup();
+      } catch (error) {
+        console.warn("Project sync at startup failed:", error?.message || error);
+      }
+
+      try {
+        await triggerCommunicationSyncAllProjectsAtStartup();
+      } catch (error) {
+        console.warn("Communication sync at startup failed:", error?.message || error);
+      }
+    })();
   }, 1500);
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

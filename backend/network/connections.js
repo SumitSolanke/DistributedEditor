@@ -7,7 +7,12 @@ import {
 } from "../storage/store.js";
 import { ipcMain } from "electron/main";
 import { broadcastToAll, syncWithDevice } from "./websockets.js";
-import { triggerProjectSync, triggerSyncAllProjects } from "./websocketSync.js";
+import {
+  triggerCommunicationSyncAllProjects,
+  triggerProjectCommunicationSync,
+  triggerProjectSync,
+  triggerSyncAllProjects,
+} from "./websocketSync.js";
 
 export function registerUser(data) {
   registerSelf(data);
@@ -83,6 +88,7 @@ export function registerHandlers() {
   ipcMain.handle("sync-project", async (event, payload) => {
     try {
       await triggerProjectSync(payload?.projectId);
+      await triggerProjectCommunicationSync(payload?.projectId);
       return { success: true };
     } catch (e) {
       console.error("IPC sync-project error:", e);
@@ -93,6 +99,7 @@ export function registerHandlers() {
   ipcMain.handle("sync-all-projects", async () => {
     try {
       await triggerSyncAllProjects();
+      await triggerCommunicationSyncAllProjects();
       return { success: true };
     } catch (e) {
       console.error("IPC sync-all-projects error:", e);
@@ -102,8 +109,10 @@ export function registerHandlers() {
 
   ipcMain.handle("sync-network-and-projects", async () => {
     try {
+      // sync order: network -> repository -> communication
       broadcastToAll();
       await triggerSyncAllProjects();
+      await triggerCommunicationSyncAllProjects();
       return { success: true };
     } catch (e) {
       console.error("IPC sync-network-and-projects error:", e);

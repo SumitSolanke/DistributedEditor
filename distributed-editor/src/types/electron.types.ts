@@ -35,6 +35,33 @@ export interface BackendProjectNode {
   children?: BackendProjectNode[];
 }
 
+export interface CommunicationMessage {
+  messageId: string;
+  author: string;
+  authorName?: string;
+  messageText: string;
+  timestamp: number;
+  resolved: boolean;
+}
+
+export interface CommunicationThread {
+  threadId: string;
+  projectId: string;
+  projectName: string;
+  filePath: string;
+  commitHash: string;
+  branch?: string;
+  branchOwner?: string;
+  startLine: number;
+  endLine: number;
+  createdBy: string;
+  createdByName?: string;
+  createdTimestamp: number;
+  resolved: boolean;
+  updatedTimestamp: number;
+  messages: CommunicationMessage[];
+}
+
 export interface ElectronAPI {
   sendUserData: (data: UserData) => Promise<void>;
   isUserRegistered: () => Promise<boolean>;
@@ -177,6 +204,15 @@ export interface ElectronAPI {
     data?: unknown;
     message?: string;
   }>;
+  gitReadFileFromCommit?: (data: {
+    projectName: string;
+    filepath: string;
+    commitOid: string;
+  }) => Promise<{
+    success: boolean;
+    data?: string;
+    message?: string;
+  }>;
   gitDiscardUncommiteChanges?: (data: {
     projectId: string;
     projectName: string;
@@ -195,6 +231,38 @@ export interface ElectronAPI {
   gitDirty?: (data: { projectName: string }) => Promise<{
     success: boolean;
     dirty?: boolean;
+    message?: string;
+  }>;
+  commCreateThread?: (data: {
+    projectId: string;
+    projectName?: string;
+    filePath: string;
+    commitHash: string;
+    branch?: string;
+    startLine: number;
+    endLine: number;
+    messageText: string;
+  }) => Promise<{ success: boolean; data?: CommunicationThread; message?: string }>;
+  commReplyThread?: (data: {
+    projectId: string;
+    threadId: string;
+    messageText: string;
+  }) => Promise<{ success: boolean; data?: CommunicationThread; message?: string }>;
+  commResolveThread?: (data: {
+    projectId: string;
+    threadId: string;
+  }) => Promise<{ success: boolean; data?: CommunicationThread; message?: string }>;
+  commGetFileThreads?: (data: {
+    projectId: string;
+    commitHash: string;
+    filePath: string;
+  }) => Promise<{ success: boolean; data?: CommunicationThread[]; message?: string }>;
+  commGetProjectThreads?: (data: {
+    projectId: string;
+  }) => Promise<{ success: boolean; data?: CommunicationThread[]; message?: string }>;
+  commGetAllThreads?: () => Promise<{
+    success: boolean;
+    data?: CommunicationThread[];
     message?: string;
   }>;
 }

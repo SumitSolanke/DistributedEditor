@@ -17,6 +17,22 @@ export interface ProjectInfo {
   branches?: Record<string, BranchMetadata>;
 }
 
+export interface LineSelectionRange {
+  startLine: number;
+  endLine: number;
+}
+
+export interface CommunicationViewerState {
+  threadId: string;
+  projectId: string;
+  projectName: string;
+  filePath: string;
+  commitHash: string;
+  startLine: number;
+  endLine: number;
+  content: string;
+}
+
 interface EditorState {
   // left sidebar view
   activeSidebar: SidebarView;
@@ -65,11 +81,22 @@ interface EditorState {
   // cursor + reveal
   cursor: CursorPos;
   setCursor: (pos: CursorPos) => void;
+  selectionRange: LineSelectionRange | null;
+  setSelectionRange: (range: LineSelectionRange | null) => void;
   pendingReveal: { fileId: string; line: number } | null;
   clearPendingReveal: () => void;
 
   highlightLine: number | null;
   revealInEditor: (fileId: string, line: number) => void;
+
+  // contextual communication viewer
+  communicationPanelOpen: boolean;
+  setCommunicationPanelOpen: (open: boolean) => void;
+  activeEditorTab: "file" | "communication";
+  setActiveEditorTab: (tab: "file" | "communication") => void;
+  communicationViewer: CommunicationViewerState | null;
+  openCommunicationViewer: (viewer: CommunicationViewerState) => void;
+  closeCommunicationViewer: () => void;
 }
 
 const generateId = () => Math.random().toString(36).slice(2, 10);
@@ -134,6 +161,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       openFiles: [],
       activeFileId: null,
       explorerAction: null,
+      selectionRange: null,
+      activeEditorTab: "file",
+      communicationViewer: null,
     }),
   openProject: (project, tree) =>
     set({
@@ -143,6 +173,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       openFiles: [],
       activeFileId: null,
       explorerAction: null,
+      selectionRange: null,
+      activeEditorTab: "file",
+      communicationViewer: null,
     }),
   updateCurrentProjectMeta: (project) =>
     set((state) => {
@@ -161,6 +194,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       explorerAction: null,
       pendingReveal: null,
       highlightLine: null,
+      selectionRange: null,
+      activeEditorTab: "file",
+      communicationViewer: null,
     }),
 
   fileTree: [],
@@ -320,11 +356,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { openFiles } = get();
     const already = openFiles.find((f) => f.id === file.id);
     if (!already) {
-      set({ openFiles: [...openFiles, file], activeFileId: file.id });
+      set({
+        openFiles: [...openFiles, file],
+        activeFileId: file.id,
+        activeEditorTab: "file",
+      });
     } else {
       set({
         openFiles: openFiles.map((f) => (f.id === file.id ? { ...f, ...file } : f)),
         activeFileId: file.id,
+        activeEditorTab: "file",
       });
     }
   },
@@ -333,14 +374,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { fileTree, openFiles } = get();
     const already = openFiles.find((f) => f.id === fileId);
     if (already) {
-      set({ activeFileId: fileId });
+      set({ activeFileId: fileId, activeEditorTab: "file" });
       return;
     }
 
     const file = findFileById(fileTree, fileId);
     if (!file) return;
 
-    set({ openFiles: [...openFiles, file], activeFileId: fileId });
+    set({
+      openFiles: [...openFiles, file],
+      activeFileId: fileId,
+      activeEditorTab: "file",
+    });
   },
 
   closeFile: (id) => {
@@ -358,7 +403,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  setActiveFile: (id) => set({ activeFileId: id }),
+  setActiveFile: (id) => set({ activeFileId: id, activeEditorTab: "file" }),
 
   updateFileContent: (id, content) => {
     // update open tabs
@@ -378,6 +423,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   cursor: { line: 1, col: 1 },
   setCursor: (pos) => set({ cursor: pos }),
 
+  selectionRange: null,
+  setSelectionRange: (range) => set({ selectionRange: range }),
+
   pendingReveal: null,
   clearPendingReveal: () => set({ pendingReveal: null }),
 
@@ -394,6 +442,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       cursor: { line: safeLine, col: 1 },
       highlightLine: safeLine,
       pendingReveal: { fileId, line: safeLine },
+      activeEditorTab: "file",
     });
 
     // 3) remove highlight after 1.2s
@@ -402,4 +451,30 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set((s) => (s.highlightLine === safeLine ? { highlightLine: null } : s));
     }, 1200);
   },
+
+  communicationPanelOpen: false,
+  setCommunicationPanelOpen: (open) =>
+    set((state) => {
+      if (open) return { communicationPanelOpen: true };
+      return {
+        communicationPanelOpen: false,
+        activeEditorTab:
+          state.activeEditorTab === "communication" ? "file" : state.activeEditorTab,
+      };
+    }),
+
+  activeEditorTab: "file",
+  setActiveEditorTab: (tab) => set({ activeEditorTab: tab }),
+
+  communicationViewer: null,
+  openCommunicationViewer: (viewer) =>
+    set({
+      communicationViewer: viewer,
+      activeEditorTab: "communication",
+    }),
+  closeCommunicationViewer: () =>
+    set({
+      communicationViewer: null,
+      activeEditorTab: "file",
+    }),
 }));

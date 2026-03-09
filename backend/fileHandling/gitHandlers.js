@@ -734,22 +734,23 @@ export function registerGitHandlers() {
       }
     },
   );
-  // // READ FILE FROM COMMIT
-  // ipcMain.handle(
-  //   "git-read-file-from-commit",
-  //   async (event, { projectName, filepath, commitOid }) => {
-  //     try {
-  //       const blob = await readFileFromCommit(
-  //         getProjectPath(projectName),
-  //         filepath,
-  //         commitOid,
-  //       );
-  //       return { success: true, data: blob };
-  //     } catch (error) {
-  //       return { success: false, message: error.message };
-  //     }
-  //   },
-  // );
+  // READ FILE FROM COMMIT
+  ipcMain.handle(
+    "git-read-file-from-commit",
+    async (event, { projectName, filepath, commitOid }) => {
+      try {
+        const blob = await readFileFromCommit(
+          getProjectPath(projectName),
+          filepath,
+          commitOid,
+        );
+        const content = Buffer.from(blob.blob).toString("utf8");
+        return { success: true, data: content };
+      } catch (error) {
+        return { success: false, message: error.message };
+      }
+    },
+  );
 
   // CHECK DIRTY STATE
   ipcMain.handle("git-is-dirty", async (event, { projectName }) => {
