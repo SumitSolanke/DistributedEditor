@@ -637,6 +637,26 @@ export function getProjectThreadIds(projectId) {
   return [...data.threadIds];
 }
 
+export function getProjectThreadSummaries(projectId) {
+  const normalizedProjectId = normalizeProjectId(projectId);
+  if (!normalizedProjectId) return [];
+
+  const project = getProjectById(normalizedProjectId);
+  if (!project?.public) return [];
+
+  const data = readData(normalizedProjectId, project.name || "");
+  return data.threadIds
+    .map((threadId) => {
+      const thread = data.threadsById[threadId];
+      if (!thread?.threadId) return null;
+      return {
+        threadId: thread.threadId,
+        updatedTimestamp: normalizeTimestamp(thread.updatedTimestamp),
+      };
+    })
+    .filter(Boolean);
+}
+
 export function getProjectThreadsByIds(projectId, threadIds = []) {
   const normalizedProjectId = normalizeProjectId(projectId);
   if (!normalizedProjectId) return [];

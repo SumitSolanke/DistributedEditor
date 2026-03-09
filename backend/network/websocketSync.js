@@ -3,7 +3,7 @@ import { getSelf } from "../storage/store.js";
 import { BrowserWindow } from "electron";
 import {
   ensureProjectCommunicationStore,
-  getProjectThreadIds,
+  getProjectThreadSummaries,
   getProjectThreadsByIds,
   upsertProjectThreads,
 } from "../storage/communication.js";
@@ -37,6 +37,38 @@ function normalizeThreadIds(threadIds) {
         .filter(Boolean),
     ),
   );
+}
+
+function normalizeThreadSummaries(raw) {
+  const map = new Map();
+  const entries = Array.isArray(raw) ? raw : [];
+
+  for (const entry of entries) {
+    if (typeof entry === "string") {
+      const threadId = entry.trim();
+      if (!threadId || map.has(threadId)) continue;
+      map.set(threadId, 0);
+      continue;
+    }
+
+    if (!entry || typeof entry !== "object") continue;
+    const threadId =
+      typeof entry.threadId === "string" ? entry.threadId.trim() : "";
+    if (!threadId) continue;
+
+    const rawTimestamp = Number(entry.updatedTimestamp);
+    const updatedTimestamp =
+      Number.isFinite(rawTimestamp) && rawTimestamp > 0
+        ? Math.floor(rawTimestamp)
+        : 0;
+
+    const previous = map.get(threadId);
+    if (typeof previous !== "number" || updatedTimestamp > previous) {
+      map.set(threadId, updatedTimestamp);
+    }
+  }
+
+  return map;
 }
 
 function ensurePublicProject(projectId) {
@@ -94,22 +126,35 @@ async function ensurePeerSocket(peer) {
   });
 }
 
-async function handleCommSyncIds(socket, projectId, threadIds = []) {
+async function handleCommSyncIds(socket, projectId, threadSummaryPayload = []) {
   const project = ensurePublicProject(projectId);
   if (!project) return;
 
   ensureProjectCommunicationStore(projectId);
-  const remoteIds = normalizeThreadIds(threadIds);
-  const localIds = getProjectThreadIds(projectId);
+  const remoteSummaryMap = normalizeThreadSummaries(threadSummaryPayload);
+  const localSummaries = getProjectThreadSummaries(projectId);
+  const localSummaryMap = new Map(
+    localSummaries.map((item) => [item.threadId, item.updatedTimestamp]),
+  );
 
-  const remoteSet = new Set(remoteIds);
-  const localSet = new Set(localIds);
+  const missingOrStaleOnRemote = localSummaries
+    .filter((item) => {
+      const remoteTimestamp = remoteSummaryMap.get(item.threadId);
+      if (typeof remoteTimestamp !== "number") return true;
+      return item.updatedTimestamp > remoteTimestamp;
+    })
+    .map((item) => item.threadId);
 
-  const missingOnRemote = localIds.filter((threadId) => !remoteSet.has(threadId));
-  const missingLocally = remoteIds.filter((threadId) => !localSet.has(threadId));
+  const missingOrStaleLocally = Array.from(remoteSummaryMap.entries())
+    .filter(([threadId, remoteTimestamp]) => {
+      const localTimestamp = localSummaryMap.get(threadId);
+      if (typeof localTimestamp !== "number") return true;
+      return remoteTimestamp > localTimestamp;
+    })
+    .map(([threadId]) => threadId);
 
-  if (missingOnRemote.length) {
-    const threads = getProjectThreadsByIds(projectId, missingOnRemote);
+  if (missingOrStaleOnRemote.length) {
+    const threads = getProjectThreadsByIds(projectId, missingOrStaleOnRemote);
     if (threads.length) {
       sendMessage(socket, {
         type: "COMM_SYNC_THREADS",
@@ -119,11 +164,11 @@ async function handleCommSyncIds(socket, projectId, threadIds = []) {
     }
   }
 
-  if (missingLocally.length) {
+  if (missingOrStaleLocally.length) {
     sendMessage(socket, {
       type: "COMM_SYNC_REQUEST",
       projectId,
-      threadIds: missingLocally,
+      threadIds: missingOrStaleLocally,
     });
   }
 }
@@ -162,12 +207,14 @@ async function sendCommThreadIds(socket, projectId) {
   if (!project) return;
 
   ensureProjectCommunicationStore(projectId);
-  const threadIds = getProjectThreadIds(projectId);
+  const threadSummaries = getProjectThreadSummaries(projectId);
+  const threadIds = threadSummaries.map((item) => item.threadId);
 
   sendMessage(socket, {
     type: "COMM_SYNC_IDS",
     projectId,
     threadIds,
+    threadSummaries,
   });
 }
 
@@ -226,7 +273,11 @@ async function routeMessage(socket, data) {
       break;
 
     case "COMM_SYNC_IDS":
-      await handleCommSyncIds(socket, data.projectId, data.threadIds || []);
+      await handleCommSyncIds(
+        socket,
+        data.projectId,
+        data.threadSummaries || data.threadIds || [],
+      );
       break;
 
     case "COMM_SYNC_REQUEST":
