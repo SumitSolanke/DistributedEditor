@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 import { useEditorStore } from "../../store/editorStore";
 import { useAuthStore } from "../../store/authStore";
-import { useChatStore } from "../../store/chatStore";
 
 interface Props {
   toggleLeft: () => void;
@@ -32,24 +31,12 @@ const roleChipClass = (role: string) => {
   return "bg-gray-600/20 border-gray-500 text-gray-200";
 };
 
-const Badge = ({ n }: { n: number }) => {
-  if (n <= 0) return null;
-  return (
-    <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-red-600 text-white">
-      {n}
-    </span>
-  );
-};
-
 export default function TopNavbar({ toggleLeft, toggleRight }: Props) {
   const { setActiveSidebar, activeFileId } = useEditorStore();
   const [syncingAll, setSyncingAll] = useState(false);
 
   const user = useAuthStore((s) => s.user);
   const reset = useAuthStore((s) => s.reset);
-
-  const { unreadPublic, unreadDm } = useChatStore();
-  const totalDmUnread = Object.values(unreadDm).reduce((a, b) => a + b, 0);
 
   const handleSave = () => {
     if (activeFileId) {
@@ -139,10 +126,7 @@ export default function TopNavbar({ toggleLeft, toggleRight }: Props) {
         </button>
 
         <button onClick={toggleRight} title="Toggle Right Sidebar">
-          <div className="flex items-center">
-            <PanelRight size={20} />
-            <Badge n={unreadPublic + totalDmUnread} />
-          </div>
+          <PanelRight size={20} />
         </button>
 
         <div className="flex items-center gap-2 ml-2">

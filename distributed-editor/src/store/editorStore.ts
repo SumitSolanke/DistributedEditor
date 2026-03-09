@@ -6,6 +6,7 @@ import type {
   SidebarView,
 } from "../types/editor.types";
 import type { BranchMetadata } from "../types/project.types";
+import type { CommunicationThread } from "../types/electron.types";
 
 export interface ProjectInfo {
   id: string;
@@ -97,6 +98,8 @@ interface EditorState {
   communicationViewer: CommunicationViewerState | null;
   openCommunicationViewer: (viewer: CommunicationViewerState) => void;
   closeCommunicationViewer: () => void;
+  communicationThreads: CommunicationThread[];
+  setCommunicationThreads: (threads: CommunicationThread[]) => void;
 }
 
 const generateId = () => Math.random().toString(36).slice(2, 10);
@@ -164,6 +167,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       selectionRange: null,
       activeEditorTab: "file",
       communicationViewer: null,
+      communicationThreads: [],
     }),
   openProject: (project, tree) =>
     set({
@@ -176,6 +180,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       selectionRange: null,
       activeEditorTab: "file",
       communicationViewer: null,
+      communicationThreads: [],
     }),
   updateCurrentProjectMeta: (project) =>
     set((state) => {
@@ -197,6 +202,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       selectionRange: null,
       activeEditorTab: "file",
       communicationViewer: null,
+      communicationThreads: [],
     }),
 
   fileTree: [],
@@ -477,4 +483,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       communicationViewer: null,
       activeEditorTab: "file",
     }),
+
+  communicationThreads: [],
+  setCommunicationThreads: (threads) => set({ communicationThreads: threads }),
 }));
