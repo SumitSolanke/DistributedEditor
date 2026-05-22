@@ -23,13 +23,13 @@ export default function ActivityBar() {
         <Files size={20} className="text-white" />
       </button>
 
-      <button
+      {/* <button
         className={iconBtn(activeSidebar === "connection")}
         title="Connection"
         onClick={() => setActiveSidebar("connection")}
       >
         <Users size={20} className="text-white" />
-      </button>
+      </button> */}
 
       <button
         className={iconBtn(gitOverlayOpen)}

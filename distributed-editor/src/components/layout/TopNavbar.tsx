@@ -85,12 +85,12 @@ export default function TopNavbar({ toggleLeft, toggleRight }: Props) {
           Explorer
         </button>
 
-        <button
+        {/* <button
           onClick={() => setActiveSidebar("connection")}
           className="text-sm px-2 py-1 bg-[#2a2d2e] rounded"
         >
           Connection
-        </button>
+        </button> */}
 
         <span className="font-semibold text-sm">Distributed Code Editor</span>
       </div>
@@ -121,21 +121,21 @@ export default function TopNavbar({ toggleLeft, toggleRight }: Props) {
           <RotateCcw size={20} />
         </button>
 
-        <button title="GitHub">
-          <Github size={20} />
-        </button>
+        {/* <button title="GitHub"> */}
+          {/* <Github size={20} /> */}
+        {/* </button> */}
 
         <button onClick={toggleRight} title="Toggle Right Sidebar">
           <PanelRight size={20} />
         </button>
 
         <div className="flex items-center gap-2 ml-2">
-          <div className="text-xs text-gray-300">{displayName}</div>
-          <div
+          <div className="text-lg text-gray-300 capitalize font-bold">{displayName}</div>
+          {/* <div
             className={`text-[11px] px-2 py-1 rounded border ${roleChipClass(displayRole)}`}
           >
             {roleLabel(displayRole)}
-          </div>
+          </div> */}
         </div>
       </div>
     </div>

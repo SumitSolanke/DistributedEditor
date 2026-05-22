@@ -78,7 +78,7 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
-  userStore.clear();
-  devices.set("list", []);
-});
+// app.on("before-quit", () => {
+//   userStore.clear();
+//   devices.set("list", []);
+// });
